@@ -278,18 +278,14 @@ chmod 644 "$CRON_FILE"
 ok "Daily update-check cron installed: $CRON_FILE"
 
 # ---- Hostname enforcement -------------------------------------------------
-# Default hostname for fresh installs is "inv" (so the Pi is reachable at
-# inv.local). If a different name is already set, we leave it alone — the
-# operator is presumed to have chosen it deliberately. The only case we fix
-# automatically is the legacy "stowtrace" hostname from older SD images.
+# StowTrace default hostname is "stowtrace" (reachable at stowtrace.local).
+# If the operator already set a deliberate hostname, we KEEP it. We only fix
+# the unconfigured "raspberrypi" default.
 info "Hostname check"
 CURRENT_HOSTNAME=$(hostname)
-DESIRED_HOSTNAME=inv
+DESIRED_HOSTNAME=stowtrace
 NEEDS_HOSTNAME_CHANGE=0
-if [ "$CURRENT_HOSTNAME" = "stowtrace" ]; then
-  warn "Detected legacy hostname 'stowtrace' — renaming to '$DESIRED_HOSTNAME'"
-  NEEDS_HOSTNAME_CHANGE=1
-elif [ "$CURRENT_HOSTNAME" = "raspberrypi" ] || [ -z "$CURRENT_HOSTNAME" ]; then
+if [ "$CURRENT_HOSTNAME" = "raspberrypi" ] || [ -z "$CURRENT_HOSTNAME" ]; then
   warn "Detected default hostname '$CURRENT_HOSTNAME' — renaming to '$DESIRED_HOSTNAME'"
   NEEDS_HOSTNAME_CHANGE=1
 else
@@ -361,13 +357,13 @@ sed -e "s/^User=.*/User=$SERVICE_USER/" \
     "$SRC_DIR/deploy/etc/st-backend.service" \
     > /etc/systemd/system/st-backend.service
 systemctl daemon-reload
-systemctl enable stowtrace-backend >/dev/null
-systemctl restart stowtrace-backend
+systemctl enable st-backend >/dev/null
+systemctl restart st-backend
 sleep 2
-if systemctl is-active --quiet stowtrace-backend; then
+if systemctl is-active --quiet st-backend; then
   ok "st-backend.service is active"
 else
-  warn "Service started but is not active yet â€” check: sudo journalctl -u stowtrace-backend -n 30"
+  warn "Service started but is not active yet â€” check: sudo journalctl -u st-backend -n 30"
 fi
 
 # ---- Verify mDNS (Avahi) so <hostname>.local works ------------------------
@@ -460,8 +456,8 @@ echo "  First time using the printer? Plug it in via USB and run:"
 echo "    ${BOLD}ptouch-print --info${RESET}"
 echo
 echo "  Useful commands:"
-echo "    sudo systemctl status stowtrace-backend     ${BLUE}# is it running?${RESET}"
-echo "    sudo journalctl -u stowtrace-backend -f     ${BLUE}# live logs${RESET}"
+echo "    sudo systemctl status st-backend     ${BLUE}# is it running?${RESET}"
+echo "    sudo journalctl -u st-backend -f     ${BLUE}# live logs${RESET}"
 echo "    sudo bash /opt/stowtrace/update.sh          ${BLUE}# pull latest${RESET}"
 echo "    hostname -I                                  ${BLUE}# show my IP${RESET}"
 echo
