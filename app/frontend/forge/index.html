@@ -1,0 +1,4033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Label Forge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo:wght@500;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- jsQR for camera-based QR scanning (Reprint Label feature). Try jsDelivr first
+     since it's frequently faster, fall back to cdnjs if blocked. -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+  if (typeof jsQR === 'undefined') {
+    document.write('<' + 'script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"><' + '/script>');
+  }
+</script>
+<style>
+  :root {
+    --bg: #ece8de;
+    --paper: #fdfcf7;
+    --ink: #161616;
+    --rule: #161616;
+    --accent: #c8341a;
+    --accent-2: #1a4d8f;
+    --muted: #6b6862;
+    --grid: rgba(22,22,22,0.05);
+    --row-alt: #f5f2e9;
+    --green: #1a5d1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+  .app { max-width: 1500px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  /* ------- HEADER ------- */
+  header {
+    border-bottom: 2px solid var(--rule);
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+  }
+  h1 {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 900;
+    font-size: 30px;
+    line-height: 0.92;
+    letter-spacing: -0.025em;
+    text-transform: uppercase;
+  }
+  h1 a { color: inherit; text-decoration: none; }
+  h1 .accent { color: var(--accent); }
+  header .home-link {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--muted);
+    padding: 4px 8px;
+    font-weight: 700;
+    font-family: 'Archivo', sans-serif;
+    align-self: flex-start;
+  }
+  header .home-link:hover { color: var(--ink); border-color: var(--ink); }
+  /* ---- PRINTER STATUS STRIP ---- */
+  .printer-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    margin-bottom: 18px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .printer-status .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #888;
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .printer-status .dot.ok { background: var(--green); box-shadow: 0 0 6px rgba(26, 93, 26, 0.5); }
+  .printer-status .dot.err { background: var(--accent); }
+  .printer-status .dot.unknown { background: #888; }
+  .printer-status .label {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .printer-status #printerText {
+    flex: 1;
+    min-width: 0;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Slice 5b: tape-color chip — shows tape size with the loaded cartridge's
+     background and ink colors as a tiny preview. */
+  .tape-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    line-height: 1.1;
+  }
+  .printer-status .printer-refresh {
+    background: none;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+    font-size: 14px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    flex-shrink: 0;
+  }
+  .printer-status .printer-refresh:hover { color: var(--ink); border-color: var(--ink); }
+  .printer-status .printer-refresh:disabled { opacity: 0.4; cursor: wait; }
+  /* On narrow phones, drop the "PRINTER:" label entirely — the dot color already
+     conveys connection state and the short status text speaks for itself. */
+  @media (max-width: 480px) {
+    .printer-status .label { display: none; }
+    .printer-status { padding: 6px 10px; gap: 6px; }
+  }
+  h1 small {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    font-weight: 500;
+    margin-top: 6px;
+  }
+  .meta {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.7;
+  }
+  .meta .stat { color: var(--ink); font-weight: 700; font-size: 11px; }
+  .meta .schema { color: var(--accent-2); font-weight: 700; }
+
+  /* ------- LAYOUT ------- */
+  .layout {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--paper);
+    border: 1.5px solid var(--rule);
+    padding: 18px;
+    position: relative;
+  }
+  .panel + .panel { margin-top: 14px; }
+  .panel h2 {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .panel h2 .num { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+
+  /* ------- FIELDS ------- */
+  .field { margin-bottom: 12px; }
+  label {
+    display: block;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  select, input[type="text"], input[type="number"], textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    padding: 7px 9px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+    border-radius: 0;
+  }
+  select:focus, input:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+
+  /* ------- BUTTONS ------- */
+  button {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 9px 12px;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  button:hover { background: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--rule);
+  }
+  button.secondary:hover { background: var(--ink); color: var(--paper); }
+  button.warn:hover { background: var(--accent); border-color: var(--accent); color: white; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .btn-row button { flex: 1; min-width: 0; }
+
+  /* ------- PRESET PICKER ------- */
+  .preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .preset {
+    border: 1px solid var(--rule);
+    background: var(--bg);
+    padding: 7px 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.1s;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .preset:hover { background: var(--ink); color: var(--paper); }
+  .preset.active { background: var(--ink); color: var(--paper); }
+  .preset .name {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .preset .dim { font-size: 9.5px; color: var(--muted); margin-top: 1px; }
+  .preset.active .dim { color: rgba(253,252,247,0.65); }
+
+  /* ------- TABLE ------- */
+  .table-wrap {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    overflow: auto;
+    max-height: 480px;
+  }
+  table.items {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.items thead {
+    position: sticky; top: 0;
+    background: var(--ink); color: var(--paper);
+    z-index: 2;
+  }
+  table.items thead th {
+    padding: 8px 8px;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-align: left;
+    border-right: 1px solid rgba(255,255,255,0.15);
+    white-space: nowrap;
+  }
+  table.items thead th:last-child { border-right: none; }
+  table.items tbody tr { border-bottom: 1px solid rgba(22,22,22,0.1); }
+  table.items tbody tr:nth-child(even) { background: var(--row-alt); }
+  table.items tbody td { padding: 4px 4px; vertical-align: middle; }
+  table.items tbody td:first-child { padding-left: 8px; }
+  table.items input[type="text"],
+  table.items textarea,
+  table.items select {
+    width: 100%;
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  table.items input[type="text"]:focus,
+  table.items textarea:focus,
+  table.items select:focus {
+    background: white;
+    border-color: var(--accent);
+    outline: none;
+  }
+  table.items textarea {
+    resize: vertical;
+    min-height: 28px;
+    line-height: 1.3;
+  }
+  table.items td.id-cell {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    padding: 0 8px;
+  }
+  table.items td.actions {
+    white-space: nowrap;
+    padding-right: 8px;
+    text-align: right;
+  }
+  table.items td.actions button {
+    padding: 4px 8px;
+    font-size: 9.5px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid rgba(22,22,22,0.2);
+    margin-left: 4px;
+  }
+  table.items td.actions button:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  table.items td.actions .print-tape-btn {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+    font-size: 12px;
+    padding: 4px 9px;
+  }
+  table.items td.actions .print-tape-btn:hover {
+    background: #2a8a2a;
+    border-color: #2a8a2a;
+  }
+  table.items td.actions .print-tape-btn:disabled {
+    background: var(--muted);
+    border-color: var(--muted);
+    cursor: wait;
+  }
+  table.items td.qr-toggle { text-align: center; }
+  table.items td.copies { width: 60px; }
+  table.items td.copies input { text-align: center; }
+  table.items td.fmt-cell { width: 100px; }
+  table.items td.fmt-cell select { font-size: 10px; }
+  .table-empty {
+    padding: 32px;
+    text-align: center;
+    color: var(--muted);
+    font-style: italic;
+    font-size: 12px;
+  }
+  .col-line1 { width: 24%; }
+  .col-line2 { width: 24%; }
+  .col-line3 { width: 18%; }
+
+  /* ------- PREVIEW ------- */
+  .preview-wrap {
+    background: var(--paper);
+    border: 1.5px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    min-height: 600px;
+  }
+  .preview-header {
+    padding: 11px 18px;
+    border-bottom: 1px dashed var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .preview-header .info {
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    font-size: 10.5px;
+  }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--rule);
+    padding: 5px 10px;
+    font-size: 9.5px;
+    cursor: pointer;
+    font-family: 'Archivo', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+  }
+  .tab.active { background: var(--ink); color: var(--paper); }
+  .preview-body {
+    flex: 1;
+    padding: 24px;
+    background:
+      repeating-linear-gradient(
+        45deg,
+        transparent 0,
+        transparent 14px,
+        rgba(0,0,0,0.02) 14px,
+        rgba(0,0,0,0.02) 15px
+      ),
+      var(--paper);
+    overflow: auto;
+  }
+
+  /* ------- LABEL CARD ------- */
+  .label-card {
+    background: white;
+    border: 0.5px solid #888;
+    overflow: hidden;
+    box-sizing: border-box;
+    position: relative;
+  }
+  .label-card.has-shadow { box-shadow: 3px 3px 0 var(--rule); border: 1px solid var(--rule); }
+  .label-card .text-block {
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .label-card .line {
+    color: black;
+    line-height: 1;
+    white-space: nowrap;
+    text-align: center;
+  }
+  .label-card .line.line-multiline { white-space: normal; }
+  .label-card .line.primary {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.005em;
+  }
+  .label-card .line.secondary {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 600;
+    color: #222;
+  }
+  .label-card .line.tertiary {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    color: #444;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .label-card .qr-block {
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .label-card .qr-block canvas,
+  .label-card .qr-block img {
+    display: block;
+    width: 100%; height: 100%;
+  }
+
+  /* ------- SHEET PREVIEW ------- */
+  .sheet-stack { display: flex; flex-direction: column; align-items: center; gap: 28px; }
+  .sheet {
+    background: white;
+    border: 1px solid var(--rule);
+    box-shadow: 4px 4px 0 var(--rule);
+    position: relative;
+  }
+  .sheet-letter { width: 8.5in; height: 11in; }
+  .sheet-a4 { width: 210mm; height: 297mm; }
+  .sheet-inner {
+    position: absolute; inset: 0;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: wrap;
+    align-content: flex-start;
+  }
+  .sheet-page-num {
+    position: absolute;
+    bottom: 4mm; right: 6mm;
+    font-size: 8px;
+    color: #aaa;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.08em;
+  }
+
+  /* ------- SINGLE PREVIEW ------- */
+  .single-stage {
+    display: flex; flex-wrap: wrap; gap: 20px;
+    align-items: flex-start; justify-content: center;
+  }
+  .single-frame {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .single-frame .caption {
+    font-size: 9.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+  }
+
+  /* ------- UTILITIES ------- */
+  .hint { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .checkbox-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px;
+  }
+  .checkbox-row input { width: auto; }
+  .checkbox-row label { margin: 0; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .alert {
+    background: var(--row-alt);
+    border-left: 3px solid var(--accent-2);
+    padding: 8px 10px;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .alert b { color: var(--accent-2); font-family: 'Archivo', sans-serif; letter-spacing: 0.05em; }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .toolbar .spacer { flex: 1; }
+
+  /* ------- PRINT ------- */
+  @media print {
+    @page { size: var(--page-size, letter); margin: 0; }
+    body { background: white !important; background-image: none !important; }
+    .app > *:not(#print-area) { display: none !important; }
+    #print-area { display: block !important; }
+    .sheet {
+      box-shadow: none !important;
+      border: none !important;
+      page-break-after: always;
+      margin: 0 !important;
+    }
+    .sheet:last-child { page-break-after: auto; }
+    .label-card {
+      box-shadow: none !important;
+      border: 0.3px solid #999 !important;
+    }
+    .sheet-page-num { display: none; }
+  }
+  #print-area { display: none; }
+
+  input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px; height: 16px;
+    cursor: pointer;
+  }
+
+  /* ============================================================================
+     SLICE 3 ADDITIONS — row printability, per-row color cell
+     ============================================================================ */
+  /* Subtle background on rows whose h doesn't match the loaded cartridge */
+  table.items tbody tr.row-unprintable {
+    background: rgba(200, 52, 26, 0.04);
+  }
+  table.items tbody tr.row-unprintable:nth-child(even) {
+    background: rgba(200, 52, 26, 0.06);
+  }
+  /* Per-row Print button is the only thing that goes disabled on a mismatch
+     (Slice 4: checkboxes stay interactive so users can duplicate/delete) */
+  table.items tbody tr.row-unprintable .print-row-btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+  /* A little corner indicator on the ID cell for unprintable rows */
+  table.items tbody tr.row-unprintable td.id-cell {
+    color: var(--accent);
+    position: relative;
+  }
+  table.items tbody tr.row-unprintable td.id-cell::before {
+    content: '✕';
+    color: var(--accent);
+    font-weight: 900;
+    margin-right: 4px;
+    font-size: 10px;
+  }
+
+  /* Color picker cell in Label Maker table */
+  table.items td.color-cell {
+    width: 110px;
+    white-space: nowrap;
+  }
+  table.items td.color-cell select {
+    font-size: 10.5px;
+  }
+
+  /* ============================================================================
+     SLICE 4 ADDITIONS — lean caret styling for in-table dropdowns,
+                          override widget in printer status strip
+     ============================================================================ */
+  /* Lean caret: small chevron inline next to text (not a wide white area on right).
+     We strip the native appearance and paint a tiny SVG caret near the right edge. */
+  table.items td.color-cell select,
+  table.items td.fmt-cell select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding-right: 14px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%23161616'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 3px center;
+    background-size: 7px 4px;
+  }
+  table.items td.color-cell select:focus,
+  table.items td.fmt-cell select:focus {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%23c8341a'/></svg>");
+  }
+
+  /* Manual tape-width override widget in the printer status strip */
+  .override-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 6px;
+  }
+  .override-sep { color: var(--muted); }
+  .override-sel {
+    width: auto !important;
+    padding: 2px 18px 2px 6px !important;
+    font-size: 11px !important;
+    background-color: var(--bg) !important;
+    border: 1px solid var(--rule) !important;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'><path d='M0 0l4 5 4-5z' fill='%23161616'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 4px center;
+    background-size: 7px 4px;
+  }
+
+  /* ============================================================================
+     SLICE 4 ADDITIONS — compact in-table selects, status override
+     ============================================================================ */
+  /* Lean look for in-table selects: native caret only, no extra padding for arrow.
+     Replaces the heavy default select chrome with a minimal inline-feel cell. */
+  table.items td.color-cell select,
+  table.items td.fmt-cell select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: none;
+    border: 1px solid transparent;
+    padding-right: 6px;          /* no extra room for a caret — the text fills the cell */
+    text-align: left;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+  }
+  table.items td.color-cell select:focus,
+  table.items td.fmt-cell select:focus {
+    border-color: var(--accent);
+    background: white;
+    outline: none;
+  }
+  /* Hover hint that the cell is interactive */
+  table.items td.color-cell:hover select,
+  table.items td.fmt-cell:hover select {
+    background: rgba(0,0,0,0.04);
+  }
+
+  /* Printer status strip — manual tape override widget */
+  .printer-status .override-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 6px;
+  }
+  .printer-status .override-sep {
+    color: var(--muted);
+    font-size: 12px;
+    opacity: 0.5;
+  }
+  .printer-status .override-sel {
+    width: auto;
+    padding: 3px 6px;
+    font-size: 11px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    cursor: pointer;
+  }
+  .printer-status .override-sel:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ============================================================================
+     SLICE 5 ADDITIONS — inline scan card for Reprint Label, matches inventory app
+     ============================================================================ */
+  .scan-card {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: 16px;
+    margin-bottom: 18px;
+  }
+  .scan-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .scan-card-head .title {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .scan-card .scan-close {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 14px;
+    padding: 2px 8px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .scan-card .scan-close:hover { color: var(--accent); border-color: var(--accent); }
+  .scan-frame {
+    position: relative;
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+    aspect-ratio: 1;
+    background: #000;
+    overflow: hidden;
+    border: 2px solid var(--ink);
+  }
+  .scan-frame video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .scan-frame canvas { display: none; }
+  .scan-status {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .scan-status.found {
+    color: #1a5d1a;
+    font-weight: 700;
+  }
+  .scan-status.error {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .scan-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    justify-content: center;
+  }
+  .scan-controls button {
+    padding: 8px 14px;
+    font-size: 11px;
+  }
+
+  /* Targeting overlay with dim mask, rounded cutout, corner brackets, dwell arc.
+     viewBox is 100×100; the cutout sits at 24..76 (52% center) with 4px rounded
+     corners. Total perimeter ≈ 200 SVG units, used for the dwell progress arc. */
+  .target-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .target-overlay svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .target-overlay .mask {
+    fill: rgba(8, 12, 16, 0.62);
+    fill-rule: evenodd;
+  }
+  .target-overlay .frame {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.32);
+    stroke-width: 0.6;
+    transition: stroke 0.2s ease, stroke-width 0.2s ease;
+  }
+  .target-overlay.locking .frame {
+    stroke: rgba(255, 200, 0, 0.6);
+    stroke-width: 0.8;
+  }
+  .target-overlay.locked .frame {
+    stroke: rgba(74, 222, 128, 0.95);
+    stroke-width: 1.2;
+  }
+  .target-overlay .corner {
+    fill: none;
+    stroke: white;
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 0 1.5px rgba(0,0,0,0.6));
+    transition: stroke 0.2s ease;
+  }
+  .target-overlay.locking .corner { stroke: #ffcc33; }
+  .target-overlay.locked  .corner { stroke: #4ade80; }
+  .target-overlay .progress {
+    fill: none;
+    stroke: #4ade80;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 0 2px rgba(74, 222, 128, 0.7));
+    transition: stroke-dashoffset 0.08s linear;
+  }
+
+  .scan-flash {
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.1s;
+  }
+  .scan-flash.flash {
+    opacity: 0.7;
+    animation: flashOut 0.4s ease-out forwards;
+  }
+  @keyframes flashOut {
+    0%   { opacity: 0.7; }
+    100% { opacity: 0; }
+  }
+
+  /* Brief highlight pulse for a row that the user just scanned (when row already
+     existed in this tab — we move it to top and pulse it). */
+  @keyframes row-pulse {
+    0%   { background: rgba(200, 52, 26, 0.30); }
+    100% { background: transparent; }
+  }
+  table.items tbody tr.row-just-scanned {
+    animation: row-pulse 1.6s ease-out;
+  }
+
+  /* ============================================================================
+     SLICE 2 ADDITIONS — tabs, bottom nav, sticky print, mobile tuning
+     ============================================================================ */
+
+  /* Bottom nav clearance so content doesn't hide under it */
+  body { padding-bottom: 76px; }
+
+  /* ---- TAB VIEWS ---- */
+  .tab-view { display: none; }
+  .tab-view.active { display: block; }
+
+  /* ---- BOTTOM NAV (mobile-first; same on desktop) ---- */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 100;
+    background: var(--ink);
+    border-top: 2px solid var(--ink);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    height: 60px;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+  }
+  .nav-btn {
+    background: var(--ink);
+    color: rgba(253,252,247,0.55);
+    border: none;
+    cursor: pointer;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px 4px;
+    border-right: 1px solid rgba(253,252,247,0.08);
+    transition: color 0.12s, background 0.12s;
+  }
+  .nav-btn:last-child { border-right: none; }
+  .nav-btn:hover { color: var(--paper); background: #222; }
+  .nav-btn .nav-icon { font-size: 20px; line-height: 1; }
+  .nav-btn.active {
+    color: var(--paper);
+    background: linear-gradient(to top, rgba(200,52,26,0.18), transparent);
+    box-shadow: inset 0 3px 0 var(--accent);
+  }
+
+  /* ---- STICKY PRINT BAR (above bottom nav) ---- */
+  .sticky-print {
+    position: fixed;
+    bottom: 60px;   /* sits right above the bottom nav */
+    left: 0; right: 0;
+    z-index: 99;
+    background: var(--paper);
+    border-top: 1.5px solid var(--ink);
+    padding: 10px 14px;
+    display: none;  /* shown when there's something to print in active tab */
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+  }
+  .sticky-print.visible { display: flex; }
+  .sticky-print .summary {
+    flex: 1;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: 'Archivo', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    min-width: 100px;
+  }
+  .sticky-print .summary b { color: var(--ink); }
+  .sticky-print .primary-btn {
+    background: #1a5d1a;
+    color: var(--paper);
+    border: none;
+    padding: 11px 18px;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .sticky-print .primary-btn.printer { background: var(--accent-2); }
+  .sticky-print .primary-btn:hover:not(:disabled) { background: var(--ink); }
+  .sticky-print .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .sticky-print .secondary-btn {
+    background: var(--paper);
+    color: var(--ink);
+    border: 1.5px solid var(--ink);
+    padding: 11px 14px;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .sticky-print .secondary-btn:hover { background: var(--ink); color: var(--paper); }
+
+  /* Make sure content doesn't hide under sticky print + nav (when print bar visible) */
+  body.has-sticky-print { padding-bottom: 138px; }
+  @media print { body.has-sticky-print { padding-bottom: 0; } body { padding-bottom: 0; } }
+
+  /* Hide bottom nav and sticky print when printing */
+  @media print {
+    .bottom-nav, .sticky-print, .printer-status, header, .tab-view:not(.active) { display: none !important; }
+  }
+
+  /* ---- LABEL FORMAT panel (W x H + saved presets list) ---- */
+  .preset-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    margin-top: 8px;
+    border-top: 1px dashed var(--rule);
+    padding-top: 8px;
+  }
+  .preset-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--bg);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  .preset-row:hover { border-color: var(--rule); }
+  .preset-row .pname {
+    flex: 1;
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preset-row .pdim {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .preset-row .pdesc {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preset-row button {
+    padding: 3px 8px;
+    font-size: 9.5px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid rgba(22,22,22,0.2);
+  }
+  .preset-row button:hover { background: var(--accent); color: white; border-color: var(--accent); }
+  .preset-row .apply-btn { color: var(--ink); }
+  .preset-row .apply-btn:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .preset-empty {
+    color: var(--muted);
+    font-size: 10.5px;
+    text-align: center;
+    padding: 12px 6px;
+    font-style: italic;
+  }
+
+  /* Per-row format column gets a Format dropdown of presets + "Custom" */
+  table.items td.fmt-cell select { font-size: 9.5px; }
+  /* Per-row W/H inline editors (compact two-input cell) */
+  table.items td.size-cell {
+    width: 110px;
+    white-space: nowrap;
+  }
+  table.items td.size-cell input {
+    width: 46px;
+    text-align: center;
+    font-size: 11px;
+    padding: 3px 4px;
+  }
+  table.items td.size-cell .x { color: var(--muted); padding: 0 2px; font-size: 10px; }
+
+  /* ---- MOBILE TUNING ---- */
+  @media (max-width: 700px) {
+    .app { padding: 16px 12px 32px; }
+    h1 { font-size: 22px; }
+    h1 small { font-size: 9px; letter-spacing: 0.2em; }
+    .meta { display: none; }
+    header { gap: 8px; }
+    .table-wrap { max-height: 360px; }
+    .toolbar { gap: 6px; }
+    .toolbar button { font-size: 10px; padding: 7px 9px; }
+    /* On narrow screens, hide the per-row Print button (use toolbar batch instead) */
+    table.items td.actions .print-row-btn { display: none; }
+    /* Compact preset list */
+    .preset-row .pdesc { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header>
+    <a href="/" class="home-link">← Home</a>
+    <h1>
+      <a href="/">LABEL <span class="accent">//</span> FORGE</a>
+      <small>BATCH LABEL MAKER · UNIQUE-ID INVENTORY · v1 SCHEMA</small>
+    </h1>
+    <div class="meta">
+      <div>STORAGE: <span id="backendIndicator"></span></div>
+      <div>SCHEMA: <span class="schema">stowtrace-inventory/v1</span></div>
+      <div>ISSUED: <span class="stat" id="usedCount">0</span> codes</div>
+      <div>QUEUE: <span class="stat" id="queueCount">0</span> labels</div>
+    </div>
+  </header>
+
+  <!-- Printer status strip — only shown in Label Maker tab -->
+  <div id="printerStatus" class="printer-status">
+    <span class="dot" id="printerDot"></span>
+    <span class="label">PRINTER:</span>
+    <span id="printerText">checking…</span>
+    <button class="printer-refresh" onclick="refreshPrinterStatus()" title="Refresh printer status">↻</button>
+    <!-- Slice 4: manual override for preview when no printer is connected.
+         Disabled (visually grayed) when a printer IS connected — cartridge always wins. -->
+    <span class="override-wrap" id="overrideWrap" style="display:none;">
+      <span class="override-sep">·</span>
+      <span class="label" style="font-size:10px;">PREVIEW AS:</span>
+      <select id="tapeOverrideSel" class="override-sel">
+        <option value="">— off —</option>
+        <option value="6">6 mm</option>
+        <option value="9">9 mm</option>
+        <option value="12" selected>12 mm</option>
+        <option value="18">18 mm</option>
+        <option value="24">24 mm</option>
+      </select>
+    </span>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- REPRINT SCAN CARD — inline, same look as inventory app         -->
+  <!-- Hidden by default. Shown when Reprint Label is clicked.        -->
+  <!-- ============================================================ -->
+  <div class="scan-card" id="scanCard" style="display:none;">
+    <div class="scan-card-head">
+      <span class="title">SCAN LABEL TO REPRINT</span>
+      <button id="scanCloseBtn" class="scan-close" aria-label="Close">✕</button>
+    </div>
+    <div class="scan-frame" id="scanFrame">
+      <video id="scanVideo" autoplay playsinline muted></video>
+      <canvas id="scanCanvas"></canvas>
+      <!-- Targeting overlay: dim mask with rounded cutout, corner brackets, dwell arc -->
+      <div class="target-overlay" id="targetOverlay">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="mask" d="M0,0 H100 V100 H0 Z
+                                M28,24
+                                C26,24 24,26 24,28
+                                V72
+                                C24,74 26,76 28,76
+                                H72
+                                C74,76 76,74 76,72
+                                V28
+                                C76,26 74,24 72,24
+                                H28 Z"/>
+          <path class="frame" d="M28,24
+                                 C26,24 24,26 24,28
+                                 V72
+                                 C24,74 26,76 28,76
+                                 H72
+                                 C74,76 76,74 76,72
+                                 V28
+                                 C76,26 74,24 72,24
+                                 H28 Z"/>
+          <path class="corner" d="M24,32 V28 C24,26 26,24 28,24 H32"/>
+          <path class="corner" d="M68,24 H72 C74,24 76,26 76,28 V32"/>
+          <path class="corner" d="M76,68 V72 C76,74 74,76 72,76 H68"/>
+          <path class="corner" d="M32,76 H28 C26,76 24,74 24,72 V68"/>
+          <path class="progress" id="dwellProgress"
+                d="M50,24
+                   H72
+                   C74,24 76,26 76,28
+                   V72
+                   C76,74 74,76 72,76
+                   H28
+                   C26,76 24,74 24,72
+                   V28
+                   C24,26 26,24 28,24
+                   H50"
+                stroke-dasharray="200" stroke-dashoffset="200"/>
+        </svg>
+      </div>
+      <div class="scan-flash" id="scanFlash"></div>
+    </div>
+    <div class="scan-status" id="scanStatus">Initializing camera…</div>
+    <div class="scan-controls">
+      <button id="manualEntryBtn" class="secondary">⌨ Type ID manually</button>
+    </div>
+  </div>
+
+  <!-- Inline manual-ID prompt: replaces the camera frame when "Type ID manually" is clicked -->
+  <div class="scan-card" id="manualCard" style="display:none;">
+    <div class="scan-card-head">
+      <span class="title">ENTER LABEL ID</span>
+      <button id="manualCloseBtn" class="scan-close" aria-label="Close">✕</button>
+    </div>
+    <div style="padding: 14px;">
+      <div class="field" style="margin-bottom: 8px;">
+        <label>Label ID (case-insensitive)</label>
+        <input type="text" id="manualIdInput" maxlength="8" placeholder="X7K2M"
+               autocapitalize="characters" autocomplete="off"
+               style="text-transform:uppercase;font-family:'JetBrains Mono';font-size:16px;letter-spacing:0.12em;" />
+      </div>
+      <div class="btn-row">
+        <button id="manualSubmitBtn" class="primary">Look up</button>
+        <button id="manualBackBtn" class="secondary">← Back to camera</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TAB: LABEL MAKER (tape printing) — default                     -->
+  <!-- ============================================================ -->
+  <div id="tab-maker" class="tab-view active">
+
+    <div class="layout">
+
+      <!-- LEFT: config for tape -->
+      <div>
+
+        <!-- LABEL FORMAT (Label Maker) — W, H, Color for next row -->
+        <div class="panel">
+          <h2><span>Label Format</span><span class="num">NEW</span></h2>
+          <div class="hint" style="margin-top:0;margin-bottom:8px;">
+            These are the defaults for <b>the next row</b> you add below. Existing rows keep their dimensions and color — change them in the table if you need to.
+          </div>
+          <div class="row">
+            <div class="field" style="margin-bottom: 0;">
+              <label>Width (mm)</label>
+              <input type="number" id="makerW" step="0.1" min="4" value="40" />
+            </div>
+            <div class="field" style="margin-bottom: 0;">
+              <label>Height (mm)</label>
+              <input type="number" id="makerH" step="0.1" min="4" value="12" />
+            </div>
+          </div>
+          <div class="field" style="margin-top: 8px; margin-bottom: 0;">
+            <label>Tape color</label>
+            <select id="makerColor">
+              <option value="white-black" selected>White / Black</option>
+              <option value="yellow-black">Yellow / Black</option>
+              <option value="clear-black">Clear / Black</option>
+              <option value="red-white">Red / White</option>
+              <option value="red-black">Red / Black</option>
+              <option value="blue-white">Blue / White</option>
+              <option value="blue-black">Blue / Black</option>
+              <option value="green-white">Green / White</option>
+              <option value="green-black">Green / Black</option>
+              <option value="black-white">Black / White</option>
+              <option value="white-red">White / Red</option>
+              <option value="white-blue">White / Blue</option>
+            </select>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <input type="text" id="makerPresetName" placeholder="Preset name (optional)" />
+            <button id="makerSavePresetBtn" class="secondary">⊕ Save as preset</button>
+          </div>
+          <input type="text" id="makerPresetDesc" placeholder="Description (optional)" style="margin-top:6px;" />
+          <div class="preset-list" id="makerPresetList">
+            <!-- populated dynamically -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: table + preview -->
+      <div>
+
+        <!-- TABLE -->
+        <div class="panel" style="padding: 14px;">
+          <div class="toolbar">
+            <button data-table="maker" class="add-row-btn">+ Add Row</button>
+            <button data-table="maker" class="add-blank-rows-btn secondary">+ 5 Rows</button>
+            <button data-table="maker" class="reprint-btn secondary">⌖ Reprint Label</button>
+            <button data-table="maker" class="dup-selected-btn secondary">Duplicate Selected</button>
+            <button data-table="maker" class="del-selected-btn secondary warn">Delete Selected</button>
+            <div class="spacer"></div>
+            <button data-table="maker" class="reissue-btn secondary">⟳ Reissue IDs</button>
+            <button data-table="maker" class="clear-table-btn secondary warn">Clear Table</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="items" id="makerTable">
+              <thead>
+                <tr>
+                  <th style="width: 30px;"><input type="checkbox" class="select-all-chk" data-table="maker" /></th>
+                  <th style="width: 64px;">ID</th>
+                  <th class="col-line1">Line 1 (primary)</th>
+                  <th class="col-line2">Line 2</th>
+                  <th class="col-line3">Line 3</th>
+                  <th style="width: 50px;">QR</th>
+                  <th style="width: 60px;">Copies</th>
+                  <th class="size-cell">W × H (mm)</th>
+                  <th style="width: 110px;">Tape Color</th>
+                  <th style="width: 80px;">Format</th>
+                  <th style="width: 90px;"></th>
+                </tr>
+              </thead>
+              <tbody id="makerBody"></tbody>
+            </table>
+          </div>
+          <div class="hint" style="margin-top: 8px;">
+            Leave all lines blank to make a <b>QR-only square label</b> (same height × height).
+            <b>Line 1</b> is biggest; <b>Lines 2/3</b> are smaller. Lines you leave blank don't take up space.
+          </div>
+        </div>
+
+        <!-- PREVIEW -->
+        <div class="preview-wrap" style="margin-top: 16px;">
+          <div class="preview-header">
+            <div style="display: flex; gap: 14px; align-items: center;">
+              <span>Preview</span>
+              <span class="info" id="makerPreviewInfo">— mm × — mm</span>
+            </div>
+          </div>
+          <div class="preview-body" id="makerPreviewBody">
+            <div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">
+              Add a row to see a preview.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TAB: PRINTER (8.5x11 paper output)                            -->
+  <!-- ============================================================ -->
+  <div id="tab-printer" class="tab-view">
+
+    <div class="layout">
+
+      <!-- LEFT: config for sheet -->
+      <div>
+
+        <!-- LABEL FORMAT (Printer) -->
+        <div class="panel">
+          <h2><span>Label Format</span><span class="num">NEW</span></h2>
+          <div class="hint" style="margin-top:0;margin-bottom:8px;">
+            Sets the size of <b>new</b> labels you add below. Existing rows keep their dimensions until you edit them directly in the table. Page setup, margins, and gaps live in the <b>Options</b> tab.
+          </div>
+          <div class="row">
+            <div class="field" style="margin-bottom: 0;">
+              <label>Width (mm)</label>
+              <input type="number" id="printerW" step="0.1" min="4" value="40" />
+            </div>
+            <div class="field" style="margin-bottom: 0;">
+              <label>Height (mm)</label>
+              <input type="number" id="printerH" step="0.1" min="4" value="25" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <input type="text" id="printerPresetName" placeholder="Preset name (optional)" />
+            <button id="printerSavePresetBtn" class="secondary">⊕ Save as preset</button>
+          </div>
+          <input type="text" id="printerPresetDesc" placeholder="Description (optional)" style="margin-top:6px;" />
+          <div class="preset-list" id="printerPresetList">
+            <!-- populated dynamically -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: table + preview -->
+      <div>
+
+        <!-- TABLE -->
+        <div class="panel" style="padding: 14px;">
+          <div class="toolbar">
+            <button data-table="printer" class="add-row-btn">+ Add Row</button>
+            <button data-table="printer" class="add-blank-rows-btn secondary">+ 5 Rows</button>
+            <button data-table="printer" class="reprint-btn secondary">⌖ Reprint Label</button>
+            <button data-table="printer" class="dup-selected-btn secondary">Duplicate Selected</button>
+            <button data-table="printer" class="del-selected-btn secondary warn">Delete Selected</button>
+            <div class="spacer"></div>
+            <button data-table="printer" class="reissue-btn secondary">⟳ Reissue IDs</button>
+            <button data-table="printer" class="clear-table-btn secondary warn">Clear Table</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="items" id="printerTable">
+              <thead>
+                <tr>
+                  <th style="width: 30px;"><input type="checkbox" class="select-all-chk" data-table="printer" /></th>
+                  <th style="width: 64px;">ID</th>
+                  <th class="col-line1">Line 1 (primary)</th>
+                  <th class="col-line2">Line 2</th>
+                  <th class="col-line3">Line 3</th>
+                  <th style="width: 50px;">QR</th>
+                  <th style="width: 60px;">Copies</th>
+                  <th class="size-cell">W × H (mm)</th>
+                  <th style="width: 80px;">Format</th>
+                  <th style="width: 90px;"></th>
+                </tr>
+              </thead>
+              <tbody id="printerBody"></tbody>
+            </table>
+          </div>
+          <div class="hint" style="margin-top: 8px;">
+            Leave all lines blank for a <b>QR-only square label</b>. Each row can override the default W × H.
+          </div>
+        </div>
+
+        <!-- PREVIEW (sheet) -->
+        <div class="preview-wrap" style="margin-top: 16px;">
+          <div class="preview-header">
+            <div style="display: flex; gap: 14px; align-items: center;">
+              <span>Sheet Preview</span>
+              <span class="info" id="printerPreviewInfo">— pages</span>
+            </div>
+          </div>
+          <div class="preview-body" id="printerPreviewBody">
+            <div style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">
+              Add a row to see the sheet layout.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TAB: OPTIONS (formerly Registry — settings + data)            -->
+  <!-- ============================================================ -->
+  <div id="tab-registry" class="tab-view">
+
+    <!-- QR DEFAULTS (single source of truth — used by both Label Maker and Printer) -->
+    <div class="panel">
+      <h2><span>QR Defaults</span><span class="num">QR</span></h2>
+      <div class="hint" style="margin-top:0;margin-bottom:8px;">
+        These settings apply to every label, regardless of which tab it was created in.
+      </div>
+      <div class="field">
+        <label>QR payload format</label>
+        <select id="qrMode">
+          <option value="id">ID only (X7K2M)</option>
+          <option value="combined" selected>ID + primary text</option>
+          <option value="json">JSON record (full)</option>
+          <option value="url">URL prefix + ID</option>
+        </select>
+      </div>
+      <div class="field" id="urlPrefixField" style="display:none;">
+        <label>URL prefix</label>
+        <input type="text" id="urlPrefix" placeholder="https://inv.local/" />
+      </div>
+      <div class="alert">
+        <b>NOTE:</b> Whatever payload you choose, the full record (id, lines, format) is logged to the registry. The QR only needs the ID for lookups — extra fields are convenience.
+      </div>
+    </div>
+
+    <!-- PAGE OPTIONS (Printer tab) — moved here from Slice 2 -->
+    <div class="panel">
+      <h2><span>Page Options (Printer)</span><span class="num">8.5×11</span></h2>
+      <div class="hint" style="margin-top:0;margin-bottom:8px;">
+        Settings for the 8.5×11 paper output on the Printer tab.
+      </div>
+      <div class="field">
+        <label>Orientation</label>
+        <select id="sheetOrientation">
+          <option value="portrait" selected>Portrait (8.5 × 11)</option>
+          <option value="landscape">Landscape (11 × 8.5) — for longer labels</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="field" style="margin-bottom: 0;">
+          <label>Page margin (mm)</label>
+          <input type="number" id="pageMargin" value="3" step="0.5" min="0" />
+        </div>
+        <div class="field" style="margin-bottom: 0;">
+          <label>Gap H (mm)</label>
+          <input type="number" id="gapH" value="1" step="0.5" min="0" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <div class="field" style="margin-bottom: 0;">
+          <label>Gap V (mm)</label>
+          <input type="number" id="gapV" value="1" step="0.5" min="0" />
+        </div>
+        <div class="field" style="margin-bottom: 0;">
+          <label>&nbsp;</label>
+          <div class="checkbox-row" style="padding: 8px 0;">
+            <input type="checkbox" id="cutMarks" checked />
+            <label for="cutMarks">Cut guides</label>
+          </div>
+        </div>
+      </div>
+      <div class="hint" id="capacityHint" style="margin-top: 8px;"></div>
+    </div>
+
+    <!-- STATISTICS -->
+    <div class="panel">
+      <h2><span>Statistics</span><span class="num">↗</span></h2>
+      <div class="row-3">
+        <div class="field" style="margin-bottom:0;">
+          <label>Issued IDs</label>
+          <div style="font-family:'Archivo';font-weight:900;font-size:28px;" id="statsUsed">0</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Maker queue</label>
+          <div style="font-family:'Archivo';font-weight:900;font-size:28px;" id="statsMakerRows">0</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Printer queue</label>
+          <div style="font-family:'Archivo';font-weight:900;font-size:28px;" id="statsPrinterRows">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BACKUP & RESTORE — Slice 6 -->
+    <div class="panel">
+      <h2><span>Backup &amp; Restore</span><span class="num">⤓⤒</span></h2>
+      <div class="hint" style="margin-bottom: 10px;">
+        Save a full snapshot of your inventory (items, used IDs, label presets). Restore from a backup later to recover after an SD card failure or a fresh install.
+      </div>
+      <div class="btn-row">
+        <button id="backupDownloadBtn" class="secondary">⤓ Download Backup</button>
+        <button id="backupToDriveBtn" class="secondary" disabled title="Plug in a USB drive to enable">⤓ Save to USB Drive</button>
+      </div>
+      <div class="hint" id="backupDriveStatus" style="margin-top:8px;font-size:11px;">
+        Checking for backup drive…
+      </div>
+      <div class="btn-row" style="margin-top: 12px;">
+        <button id="restoreBtn" class="secondary">⤒ Restore from Backup</button>
+        <input type="file" id="restoreFile" accept="application/json,.json" style="display:none;" />
+      </div>
+      <div class="alert" style="margin-top: 10px;">
+        <b>Restore is additive.</b> Only items not already in your current registry will be added — your existing data is never overwritten or lost.
+      </div>
+    </div>
+
+    <!-- REGISTRY & DATA -->
+    <div class="panel">
+      <h2><span>Registry &amp; Data</span><span class="num">↓↑</span></h2>
+      <div class="hint" style="margin-bottom: 10px;">
+        Inventory-only export for moving items between the forge and inventory apps. For full system backups, use <b>Backup &amp; Restore</b> above.
+      </div>
+      <div class="btn-row">
+        <button id="exportJsonBtn" class="secondary">⤓ Export JSON</button>
+        <button id="exportCsvBtn" class="secondary">⤓ Export CSV</button>
+      </div>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="importBtn" class="secondary">⤒ Import JSON</button>
+        <input type="file" id="importFile" accept="application/json,.json" style="display:none;" />
+      </div>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="resetBtn" class="secondary warn">⚠ Reset Everything</button>
+      </div>
+    </div>
+
+    <!-- STORAGE BACKEND -->
+    <div class="panel">
+      <h2><span>Storage Backend</span><span class="num">⛁</span></h2>
+      <div class="hint">
+        Current backend: <span id="backendIndicator2"></span>
+      </div>
+      <div class="hint" style="margin-top: 10px;">
+        <b>Shared on Pi</b>: all devices see the same registry. <b>Local</b>: this browser only.
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- Off-screen area for printing -->
+<div id="print-area"></div>
+
+<!-- ============================================================ -->
+<!-- STICKY PRINT BAR — appears above bottom nav per active tab     -->
+<!-- ============================================================ -->
+<div id="stickyPrint" class="sticky-print">
+  <!-- Contents filled dynamically based on active tab -->
+</div>
+
+<!-- ============================================================ -->
+<!-- BOTTOM NAV                                                    -->
+<!-- ============================================================ -->
+<nav class="bottom-nav" role="navigation" aria-label="Main">
+  <button class="nav-btn active" data-tab="maker">
+    <span class="nav-icon">⎙</span><span>Label Maker</span>
+  </button>
+  <button class="nav-btn" data-tab="printer">
+    <span class="nav-icon">📄</span><span>Printer</span>
+  </button>
+  <button class="nav-btn" data-tab="registry">
+    <span class="nav-icon">⚙</span><span>Options</span>
+  </button>
+</nav>
+
+<script>
+/* ============================================================================
+   STOWTRACE LABEL FORGE — Slice 2
+   Schema: stowtrace-inventory/v1
+   Tabs: maker (tape) / printer (8.5x11) / registry
+   ============================================================================ */
+
+const SCHEMA_VERSION = 'stowtrace-inventory/v1';
+
+/* ---- STORAGE KEYS ---- */
+const KEY_USED          = 'st:used';
+const KEY_REG           = 'st:registry';
+const KEY_ROWS_LEGACY   = 'st:rows';            // pre-v1.12, archived on first load
+const KEY_ROWS_ARCHIVE  = 'st:rows_archive';    // recovery copy of legacy rows
+const KEY_MAKER_ROWS    = 'st:maker_rows';
+const KEY_PRINTER_ROWS  = 'st:printer_rows';
+const KEY_CFG           = 'st:config';
+const KEY_TAPE_PRESETS  = 'st:tape_presets';
+const KEY_SHEET_PRESETS = 'st:sheet_presets';
+
+/* ---- TAPE COLORS (Brother-style swatches) ---- */
+const TAPE_COLORS = {
+  'white-black':  { tape: '#ffffff', ink: '#000000', name: 'White / Black' },
+  'yellow-black': { tape: '#f6d33a', ink: '#000000', name: 'Yellow / Black' },
+  'clear-black':  { tape: '#e8efe8', ink: '#000000', name: 'Clear / Black' },
+  'red-white':    { tape: '#c8341a', ink: '#ffffff', name: 'Red / White' },
+  'red-black':    { tape: '#e8857a', ink: '#000000', name: 'Red / Black' },
+  'blue-white':   { tape: '#1a4d8f', ink: '#ffffff', name: 'Blue / White' },
+  'blue-black':   { tape: '#8fb3d9', ink: '#000000', name: 'Blue / Black' },
+  'green-white':  { tape: '#1a5d1a', ink: '#ffffff', name: 'Green / White' },
+  'green-black':  { tape: '#8fc78f', ink: '#000000', name: 'Green / Black' },
+  'black-white':  { tape: '#161616', ink: '#ffffff', name: 'Black / White' },
+  'white-red':    { tape: '#ffffff', ink: '#c8341a', name: 'White / Red' },
+  'white-blue':   { tape: '#ffffff', ink: '#1a4d8f', name: 'White / Blue' },
+};
+
+/* ---- STATE ---- */
+const state = {
+  used: new Set(),
+  registry: {},
+  activeTab: 'maker',   // 'maker' | 'printer' | 'registry'
+
+  // QR settings — single instance now lives in the Options tab
+  qrMode: 'combined',
+  urlPrefix: '',
+
+  // LABEL MAKER tab
+  maker: {
+    rows: [],                       // [{uid, id, line1, line2, line3, qr, copies, w, h, color, formatName, selected, created}]
+    formatW: 40,
+    formatH: 12,
+    formatColor: 'white-black',     // Slice 4: default tape color for new rows
+    presets: [],                    // [{id, name, desc, w, h}]
+  },
+
+  // PRINTER tab
+  printer: {
+    rows: [],
+    formatW: 40,
+    formatH: 25,
+    presets: [],
+    orientation: 'portrait',
+    pageMargin: 3, gapH: 1, gapV: 1, cutMarks: true,
+  },
+
+  // Slice 4: manual tape-width override (preview only, used when no printer connected).
+  // '' (empty) means no override. When a printer IS connected, override is ignored.
+  tapeOverrideMm: '',
+};
+
+/* ---- ID GENERATION ---- */
+const ALPHA = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const ID_LEN = 5;
+function randomId() {
+  let s = '';
+  for (let i = 0; i < ID_LEN; i++) s += ALPHA[Math.floor(Math.random() * ALPHA.length)];
+  return s;
+}
+async function issueId() {
+  for (let i = 0; i < 200; i++) {
+    const id = randomId();
+    if (!state.used.has(id)) {
+      state.used.add(id);
+      await persistUsed();
+      return id;
+    }
+  }
+  throw new Error('ID space exhausted');
+}
+
+/* ---- PERSISTENCE — same backend probe pattern as before ---- */
+const BACKEND_API = 'api';
+const BACKEND_LOCAL = 'local';
+const BACKEND_CLAUDE = 'claude';
+const BACKEND_MEMORY = 'memory';
+let _backendType = BACKEND_MEMORY;
+let _backendLabel = 'memory only';
+
+async function _probeApi() {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 1500);
+    const r = await fetch('/api/health', { signal: ctl.signal, cache: 'no-store' });
+    clearTimeout(t);
+    if (r.ok) { const j = await r.json(); if (j && j.ok) return true; }
+  } catch (e) {}
+  return false;
+}
+function _makeApiStorage() {
+  return {
+    get: async (k) => {
+      try {
+        const r = await fetch('/api/kv/' + encodeURIComponent(k), { cache: 'no-store' });
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('http ' + r.status);
+        const j = await r.json();
+        return j && j.value !== undefined ? { value: j.value } : null;
+      } catch (e) { console.warn('api get failed for', k, e); return null; }
+    },
+    set: async (k, v) => {
+      try {
+        const r = await fetch('/api/kv/' + encodeURIComponent(k), {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: v }),
+        });
+        if (!r.ok) throw new Error('http ' + r.status);
+      } catch (e) { console.warn('api set failed for', k, e); }
+    },
+  };
+}
+function _makeLocalStorage() {
+  return {
+    get: async (k) => { const v = localStorage.getItem(k); return v === null ? null : { value: v }; },
+    set: async (k, v) => { localStorage.setItem(k, v); },
+  };
+}
+function _makeMemoryStorage() {
+  const mem = {};
+  return {
+    get: async (k) => mem[k] !== undefined ? { value: mem[k] } : null,
+    set: async (k, v) => { mem[k] = v; },
+  };
+}
+let _storage;
+try {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('__st_test__', '1'); localStorage.removeItem('__st_test__');
+    _storage = _makeLocalStorage();
+    _backendType = BACKEND_LOCAL; _backendLabel = 'this device only';
+  } else if (typeof window !== 'undefined' && window.storage) {
+    _storage = window.storage;
+    _backendType = BACKEND_CLAUDE; _backendLabel = 'claude env';
+  } else { _storage = _makeMemoryStorage(); }
+} catch (e) { _storage = _makeMemoryStorage(); }
+
+async function _upgradeToApiIfAvailable() {
+  const ok = await _probeApi();
+  if (ok) {
+    _storage = _makeApiStorage();
+    _backendType = BACKEND_API; _backendLabel = 'shared on Pi';
+    updateBackendIndicator();
+    await loadAll();
+    renderAll();
+    startSyncPolling();
+  } else { updateBackendIndicator(); }
+}
+function updateBackendIndicator() {
+  const colors = {
+    [BACKEND_API]:    { dot: '#2a8a2a', text: 'SHARED · Pi' },
+    [BACKEND_LOCAL]:  { dot: '#c8341a', text: 'LOCAL · this browser only' },
+    [BACKEND_CLAUDE]: { dot: '#1a4d8f', text: 'CLAUDE ENV' },
+    [BACKEND_MEMORY]: { dot: '#888',    text: 'MEMORY ONLY (no save)' },
+  };
+  const c = colors[_backendType] || colors[BACKEND_MEMORY];
+  const html = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c.dot};margin-right:6px;vertical-align:middle;"></span>${c.text}`;
+  ['backendIndicator','backendIndicator2'].forEach(id => {
+    const e = el(id); if (e) e.innerHTML = html;
+  });
+}
+
+let _syncTimer = null;
+let _lastRegistryHash = '';
+function startSyncPolling() {
+  if (_syncTimer) clearInterval(_syncTimer);
+  _syncTimer = setInterval(async () => {
+    if (_backendType !== BACKEND_API) return;
+    try {
+      const r = await fetch('/api/registry-hash', { cache: 'no-store' });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.hash && j.hash !== _lastRegistryHash) {
+        _lastRegistryHash = j.hash;
+        const reg = await _storage.get(KEY_REG);
+        const used = await _storage.get(KEY_USED);
+        if (reg && reg.value) state.registry = JSON.parse(reg.value);
+        if (used && used.value) state.used = new Set(JSON.parse(used.value));
+        updateMeta();
+      }
+    } catch (e) {}
+  }, 5000);
+}
+
+async function persistUsed()        { try { await _storage.set(KEY_USED, JSON.stringify([...state.used])); } catch(e){} }
+async function persistRegistry()    { try { await _storage.set(KEY_REG, JSON.stringify(state.registry)); } catch(e){} }
+async function persistMakerRows()   { try { await _storage.set(KEY_MAKER_ROWS, JSON.stringify(state.maker.rows)); } catch(e){} }
+async function persistPrinterRows() { try { await _storage.set(KEY_PRINTER_ROWS, JSON.stringify(state.printer.rows)); } catch(e){} }
+async function persistTapePresets()   { try { await _storage.set(KEY_TAPE_PRESETS, JSON.stringify(state.maker.presets)); } catch(e){} }
+async function persistSheetPresets()  { try { await _storage.set(KEY_SHEET_PRESETS, JSON.stringify(state.printer.presets)); } catch(e){} }
+
+async function persistConfig() {
+  try {
+    await _storage.set(KEY_CFG, JSON.stringify({
+      activeTab: state.activeTab,
+      qrMode: state.qrMode,
+      urlPrefix: state.urlPrefix,
+      // maker
+      makerW: state.maker.formatW,
+      makerH: state.maker.formatH,
+      // printer
+      printerW: state.printer.formatW,
+      printerH: state.printer.formatH,
+      orientation: state.printer.orientation,
+      pageMargin: state.printer.pageMargin,
+      gapH: state.printer.gapH,
+      gapV: state.printer.gapV,
+      cutMarks: state.printer.cutMarks,
+      // tape (Slice 4)
+      tapeOverrideMm: state.tapeOverrideMm,
+      makerFormatColor: state.maker.formatColor,
+    }));
+  } catch(e){}
+}
+
+async function loadAll() {
+  // Used + registry
+  try { const u = await _storage.get(KEY_USED); if (u && u.value) state.used = new Set(JSON.parse(u.value)); } catch(e){}
+  try { const r = await _storage.get(KEY_REG); if (r && r.value) state.registry = JSON.parse(r.value); } catch(e){}
+
+  // MIGRATION: archive any legacy rows then start fresh (per Kenny's request)
+  try {
+    const legacy = await _storage.get(KEY_ROWS_LEGACY);
+    if (legacy && legacy.value) {
+      const existingArchive = await _storage.get(KEY_ROWS_ARCHIVE);
+      // Only archive once — don't keep clobbering it on every load
+      if (!existingArchive || !existingArchive.value) {
+        await _storage.set(KEY_ROWS_ARCHIVE, legacy.value);
+        console.log('[migration] archived pre-v1.12 rows to', KEY_ROWS_ARCHIVE);
+      }
+      // Wipe the legacy key so we don't re-archive on subsequent loads
+      await _storage.set(KEY_ROWS_LEGACY, '');
+    }
+  } catch(e) { console.warn('migration failed:', e); }
+
+  // Per-tab rows
+  try { const r = await _storage.get(KEY_MAKER_ROWS); if (r && r.value) state.maker.rows = JSON.parse(r.value); } catch(e){}
+  try { const r = await _storage.get(KEY_PRINTER_ROWS); if (r && r.value) state.printer.rows = JSON.parse(r.value); } catch(e){}
+
+  // Presets
+  try { const r = await _storage.get(KEY_TAPE_PRESETS); if (r && r.value) state.maker.presets = JSON.parse(r.value); } catch(e){}
+  try { const r = await _storage.get(KEY_SHEET_PRESETS); if (r && r.value) state.printer.presets = JSON.parse(r.value); } catch(e){}
+
+  // Config
+  try {
+    const c = await _storage.get(KEY_CFG);
+    if (c && c.value) {
+      const cfg = JSON.parse(c.value);
+      if (cfg.activeTab && ['maker','printer','registry'].includes(cfg.activeTab)) state.activeTab = cfg.activeTab;
+      if (cfg.qrMode) state.qrMode = cfg.qrMode;
+      if (cfg.urlPrefix) state.urlPrefix = cfg.urlPrefix;
+      if (cfg.makerW != null) state.maker.formatW = cfg.makerW;
+      if (cfg.makerH != null) state.maker.formatH = cfg.makerH;
+      if (cfg.printerW != null) state.printer.formatW = cfg.printerW;
+      if (cfg.printerH != null) state.printer.formatH = cfg.printerH;
+      if (cfg.orientation) state.printer.orientation = cfg.orientation;
+      if (cfg.pageMargin != null) state.printer.pageMargin = cfg.pageMargin;
+      if (cfg.gapH != null) state.printer.gapH = cfg.gapH;
+      if (cfg.gapV != null) state.printer.gapV = cfg.gapV;
+      if (cfg.cutMarks != null) state.printer.cutMarks = cfg.cutMarks;
+      // Slice 4: tape override + maker default color (migrate old fields if present)
+      if (cfg.tapeOverrideMm != null) state.tapeOverrideMm = cfg.tapeOverrideMm;
+      else if (cfg.tapeWidthMm && cfg.tapeWidthMm !== 'auto') state.tapeOverrideMm = cfg.tapeWidthMm;
+      if (cfg.makerFormatColor) state.maker.formatColor = cfg.makerFormatColor;
+      else if (cfg.tapeColor) state.maker.formatColor = cfg.tapeColor;
+    }
+  } catch(e){}
+
+  // Apply config to inputs
+  applyConfigToInputs();
+}
+
+function applyConfigToInputs() {
+  // Maker
+  if (el('makerW')) el('makerW').value = state.maker.formatW;
+  if (el('makerH')) el('makerH').value = state.maker.formatH;
+  if (el('makerColor')) el('makerColor').value = state.maker.formatColor;
+  if (el('tapeOverrideSel')) el('tapeOverrideSel').value = state.tapeOverrideMm || '';
+  // Printer
+  if (el('printerW')) el('printerW').value = state.printer.formatW;
+  if (el('printerH')) el('printerH').value = state.printer.formatH;
+  if (el('sheetOrientation')) el('sheetOrientation').value = state.printer.orientation;
+  if (el('pageMargin')) el('pageMargin').value = state.printer.pageMargin;
+  if (el('gapH')) el('gapH').value = state.printer.gapH;
+  if (el('gapV')) el('gapV').value = state.printer.gapV;
+  if (el('cutMarks')) el('cutMarks').checked = !!state.printer.cutMarks;
+  // QR (single instance lives in Options tab)
+  if (el('qrMode')) el('qrMode').value = state.qrMode;
+  if (el('urlPrefix')) el('urlPrefix').value = state.urlPrefix;
+  toggleUrlField();
+}
+
+/* ---- DOM HELPERS ---- */
+function el(id) { return document.getElementById(id); }
+function uid() { return 'r' + Math.random().toString(36).slice(2, 10); }
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---- TAB MANAGEMENT ---- */
+function switchTab(tabName) {
+  if (!['maker','printer','registry'].includes(tabName)) return;
+  state.activeTab = tabName;
+  document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+  const view = el('tab-' + tabName);
+  if (view) view.classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tabName);
+  });
+  // Printer status strip only relevant for Label Maker
+  const ps = el('printerStatus');
+  if (ps) ps.style.display = (tabName === 'maker') ? '' : 'none';
+  // Slice 6: refresh backup drive availability when Options tab opens
+  if (tabName === 'registry' && typeof refreshBackupDriveStatus === 'function') {
+    refreshBackupDriveStatus();
+  }
+  updateStickyPrint();
+  schedulePreview();
+  persistConfig();
+}
+
+/* ---- ROW HELPERS — work on the active tab or a specified one ---- */
+function getTabState(tabName) {
+  if (tabName === 'maker') return state.maker;
+  if (tabName === 'printer') return state.printer;
+  return null;
+}
+function activeTabState() { return getTabState(state.activeTab); }
+
+function persistTabRows(tabName) {
+  if (tabName === 'maker') return persistMakerRows();
+  if (tabName === 'printer') return persistPrinterRows();
+}
+function persistTabPresets(tabName) {
+  if (tabName === 'maker') return persistTapePresets();
+  if (tabName === 'printer') return persistSheetPresets();
+}
+
+/* ---- ROW OPERATIONS ---- */
+async function addRow(tabName, opts = {}) {
+  const ts = getTabState(tabName);
+  if (!ts) return;
+  // Slice 5: reprint flow passes opts.preserveId — we reuse that ID instead of issuing
+  // a fresh one. Also tracked: opts.isReprint flag tells the print-success path to PUT
+  // updated text lines back to inventory.
+  const id = opts.preserveId ? opts.preserveId : await issueId();
+  if (opts.preserveId) {
+    // Make sure the ID is tracked as issued (it should be, but defensive)
+    state.used.add(id);
+    persistUsed();
+  }
+  const w = opts.w != null ? opts.w : ts.formatW;
+  const h = opts.h != null ? opts.h : ts.formatH;
+  // Maker rows get stamped with the per-tab Label Format default color; printer rows ignore color.
+  const color = (tabName === 'maker') ? (opts.color || state.maker.formatColor || 'white-black') : null;
+  const row = {
+    uid: uid(),
+    id,
+    line1: opts.line1 || '',
+    line2: opts.line2 || '',
+    line3: opts.line3 || '',
+    qr: opts.qr !== undefined ? opts.qr : true,
+    copies: opts.copies || 1,
+    w, h,
+    color,             // Slice 3: per-row color (Label Maker only)
+    formatName: opts.formatName || 'custom',
+    isReprint: !!opts.isReprint,   // Slice 5: marks rows that came from QR scan
+    selected: false,
+    created: new Date().toISOString(),
+  };
+  // Slice 3: new rows go at the TOP of the table (so on mobile users don't scroll)
+  ts.rows.unshift(row);
+  logRow(row);
+  await persistTabRows(tabName);
+  renderTab(tabName);
+  // Focus first text field of the new row
+  setTimeout(() => {
+    const sel = `#${tabName}Body tr[data-uid="${row.uid}"] .line1`;
+    const ta = document.querySelector(sel);
+    if (ta) ta.focus();
+  }, 0);
+  return row;
+}
+
+async function duplicateRow(tabName, uidStr) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const row = ts.rows.find(r => r.uid === uidStr); if (!row) return;
+  await addRow(tabName, {
+    line1: row.line1, line2: row.line2, line3: row.line3,
+    qr: row.qr, copies: row.copies,
+    w: row.w, h: row.h, color: row.color, formatName: row.formatName,
+  });
+}
+
+async function deleteRow(tabName, uidStr) {
+  const ts = getTabState(tabName); if (!ts) return;
+  ts.rows = ts.rows.filter(r => r.uid !== uidStr);
+  await persistTabRows(tabName);
+  renderTab(tabName);
+}
+
+function logRow(row) {
+  state.registry[row.id] = {
+    id: row.id,
+    lines: [row.line1, row.line2, row.line3].filter(x => x && x.trim()),
+    qr: !!row.qr,
+    qr_payload: buildQrPayload(row),
+    w_mm: row.w,
+    h_mm: row.h,
+    format_name: row.formatName,
+    created: row.created,
+    updated: new Date().toISOString(),
+  };
+  persistRegistry();
+}
+
+/* ---- QR PAYLOAD ---- */
+function buildQrPayload(row) {
+  const mode = state.qrMode;
+  const id = row.id || '?????';
+  const name = row.line1 || '';
+  switch (mode) {
+    case 'id': return id;
+    case 'combined': return name ? id + '|' + name : id;
+    case 'json':
+      return JSON.stringify({
+        s: SCHEMA_VERSION,
+        id,
+        l: [row.line1, row.line2, row.line3].filter(x => x && x.trim())
+      });
+    case 'url': {
+      const p = (state.urlPrefix || '').trim();
+      if (!p) return id;
+      return (p.endsWith('/') ? p : p + '/') + id;
+    }
+  }
+  return id;
+}
+
+function generateQRDataUrl(text, sizePx, colorDark = '#000000', colorLight = '#ffffff') {
+  const tmp = document.createElement('div');
+  tmp.style.position = 'absolute'; tmp.style.left = '-99999px';
+  document.body.appendChild(tmp);
+  try {
+    new QRCode(tmp, {
+      text: text || ' ',
+      width: sizePx, height: sizePx,
+      correctLevel: QRCode.CorrectLevel.M,
+      colorDark, colorLight,
+    });
+    const cv = tmp.querySelector('canvas');
+    const img = tmp.querySelector('img');
+    let url = '';
+    if (cv) url = cv.toDataURL('image/png');
+    else if (img) url = img.src;
+    return url;
+  } finally { document.body.removeChild(tmp); }
+}
+
+/* ---- LABEL CARD BUILDER ----
+   Now takes the row's own w/h directly. If a row has zero text lines and qr=on,
+   we render a square QR-only label (height × height) instead of using row.w. */
+const MM_TO_PX = 96 / 25.4;
+
+function effectiveDimsForRow(row) {
+  const hasText = !!((row.line1 && row.line1.trim()) ||
+                     (row.line2 && row.line2.trim()) ||
+                     (row.line3 && row.line3.trim()));
+  if (!hasText && row.qr) {
+    // QR-only square: side = h (whichever the user set)
+    const side = row.h || 12;
+    return { w: side, h: side, qrOnly: true };
+  }
+  return { w: row.w || 40, h: row.h || 12, qrOnly: false };
+}
+
+function buildLabelCard(row, opts = {}) {
+  const { withShadow = false, tapeColor = null } = opts;
+  const dims = effectiveDimsForRow(row);
+  const wPx = dims.w * MM_TO_PX;
+  const hPx = dims.h * MM_TO_PX;
+
+  const card = document.createElement('div');
+  card.className = 'label-card' + (withShadow ? ' has-shadow' : '');
+  card.style.width = wPx + 'px';
+  card.style.height = hPx + 'px';
+  card.style.position = 'relative';
+
+  // Tape color tint (Label Maker preview only)
+  if (tapeColor && TAPE_COLORS[tapeColor]) {
+    card.style.background = TAPE_COLORS[tapeColor].tape;
+  }
+  const inkColor = (tapeColor && TAPE_COLORS[tapeColor]) ? TAPE_COLORS[tapeColor].ink : '#000000';
+  const bgColor  = (tapeColor && TAPE_COLORS[tapeColor]) ? TAPE_COLORS[tapeColor].tape : '#ffffff';
+
+  // Printable area heights per common tape width — used to inset the QR/text
+  // for tape-mode rendering. For non-tape sizes we fall back to a proportional inset.
+  const PRINTABLE_HEIGHT_MM_TABLE = { 6: 4.5, 9: 7.05, 12: 9.88, 18: 15.8, 24: 18.05 };
+  const MARGIN_H_MM = 4.0;
+  const GAP_MM = 0.8;
+  const marginHpx = MARGIN_H_MM * MM_TO_PX;
+  const gapPx = GAP_MM * MM_TO_PX;
+  const printableHeightMm = PRINTABLE_HEIGHT_MM_TABLE[Math.round(dims.h)] || (dims.h * 0.82);
+  const printableHeightPx = printableHeightMm * MM_TO_PX;
+  const marginVpx = Math.max(0, (hPx - printableHeightPx) / 2);
+
+  // QR-only square: fill the whole printable area with the QR
+  if (dims.qrOnly) {
+    const qrSide = Math.min(wPx, hPx) - 2 * marginVpx;
+    const qb = document.createElement('div');
+    qb.className = 'qr-block';
+    qb.style.position = 'absolute';
+    qb.style.left = ((wPx - qrSide) / 2) + 'px';
+    qb.style.top = ((hPx - qrSide) / 2) + 'px';
+    qb.style.width = qrSide + 'px';
+    qb.style.height = qrSide + 'px';
+    if (tapeColor) qb.style.background = bgColor;
+    const payload = buildQrPayload(row);
+    const url = generateQRDataUrl(payload, Math.max(80, Math.round(qrSide * 4)), inkColor, bgColor);
+    if (url) { const img = document.createElement('img'); img.src = url; qb.appendChild(img); }
+    card.appendChild(qb);
+    card._fit = function(){};
+    return card;
+  }
+
+  // Normal: text on the left, optional QR square on the right
+  const qrSidePx = row.qr ? (hPx - 2 * marginVpx) : 0;
+  const qrLeftPx = row.qr ? (wPx - marginHpx - qrSidePx) : 0;
+
+  const textLeft = marginHpx;
+  const textTop = marginVpx;
+  const textHeight = hPx - 2 * marginVpx;
+  const textRight = row.qr ? (qrLeftPx - gapPx) : (wPx - marginHpx);
+  const textWidth = Math.max(0, textRight - textLeft);
+
+  // Text block
+  const tb = document.createElement('div');
+  tb.className = 'text-block';
+  tb.style.position = 'absolute';
+  tb.style.left = textLeft + 'px';
+  tb.style.top = textTop + 'px';
+  tb.style.width = textWidth + 'px';
+  tb.style.height = textHeight + 'px';
+  card.appendChild(tb);
+
+  const lines = [];
+  if (row.line1 && row.line1.trim()) lines.push({ text: row.line1, cls: 'primary', weight: 1.0 });
+  if (row.line2 && row.line2.trim()) lines.push({ text: row.line2, cls: 'secondary', weight: 0.62 });
+  if (row.line3 && row.line3.trim()) lines.push({ text: row.line3, cls: 'tertiary', weight: 0.50 });
+  if (lines.length === 0) lines.push({ text: row.id || '?????', cls: 'primary', weight: 1.0 });
+
+  // QR
+  if (row.qr) {
+    const qb = document.createElement('div');
+    qb.className = 'qr-block';
+    qb.style.position = 'absolute';
+    qb.style.left = qrLeftPx + 'px';
+    qb.style.top = marginVpx + 'px';
+    qb.style.width = qrSidePx + 'px';
+    qb.style.height = qrSidePx + 'px';
+    if (tapeColor) qb.style.background = bgColor;
+    const payload = buildQrPayload(row);
+    const url = generateQRDataUrl(payload, Math.max(80, Math.round(qrSidePx * 4)), inkColor, bgColor);
+    if (url) { const img = document.createElement('img'); img.src = url; qb.appendChild(img); }
+    card.appendChild(qb);
+  }
+
+  const lineEls = lines.map(l => {
+    const d = document.createElement('div');
+    d.className = 'line ' + l.cls;
+    d.textContent = l.text;
+    if (tapeColor && TAPE_COLORS[tapeColor]) d.style.color = TAPE_COLORS[tapeColor].ink;
+    tb.appendChild(d);
+    return { el: d, weight: l.weight };
+  });
+
+  card._fit = function() { fitTextLines(tb, lineEls, textWidth, textHeight); };
+  return card;
+}
+
+function fitTextLines(textBlock, lineEls, boxW, boxH) {
+  if (!lineEls.length || boxW <= 0 || boxH <= 0) return;
+  textBlock.style.display = 'flex';
+  textBlock.style.flexDirection = 'column';
+  textBlock.style.justifyContent = 'center';
+  textBlock.style.alignItems = 'center';
+  const totalWeight = lineEls.reduce((s, l) => s + l.weight, 0);
+  const measurer = document.createElement('span');
+  measurer.style.cssText = ['position:absolute','left:-99999px','top:-99999px','visibility:hidden','white-space:nowrap','line-height:1','padding:0','margin:0','border:0'].join(';');
+  document.body.appendChild(measurer);
+  try {
+    for (const le of lineEls) {
+      const lineH = (le.weight / totalWeight) * boxH;
+      const cs = window.getComputedStyle(le.el);
+      measurer.style.fontFamily = cs.fontFamily;
+      measurer.style.fontWeight = cs.fontWeight;
+      measurer.style.fontStyle = cs.fontStyle;
+      measurer.style.letterSpacing = cs.letterSpacing;
+      measurer.style.textTransform = cs.textTransform;
+      measurer.textContent = le.el.textContent;
+      let lo = 2, hi = boxH * 2, best = lo;
+      for (let i = 0; i < 28; i++) {
+        const mid = (lo + hi) / 2;
+        measurer.style.fontSize = mid + 'px';
+        const w = measurer.offsetWidth, h = measurer.offsetHeight;
+        if (w <= boxW && h <= lineH) { best = mid; lo = mid; } else { hi = mid; }
+      }
+      le.el.style.lineHeight = '1';
+      le.el.style.padding = '0';
+      le.el.style.margin = '0';
+      le.el.style.fontSize = best + 'px';
+    }
+  } finally { document.body.removeChild(measurer); }
+}
+
+/* ---- TABLE RENDERING (one renderer for both tabs) ---- */
+function renderTable(tabName) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const tb = el(tabName + 'Body'); if (!tb) return;
+  tb.innerHTML = '';
+  // Number of columns varies: Label Maker has a Tape Color column (11), Printer doesn't (10)
+  const colCount = (tabName === 'maker') ? 11 : 10;
+  if (ts.rows.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="${colCount}"><div class="table-empty">No rows. Click <b>+ Add Row</b> to begin.</div></td>`;
+    tb.appendChild(tr);
+    return;
+  }
+
+  // Slice 4: a Maker row is "printable" if its h matches the active tape height
+  // (loaded cartridge if connected, else manual override if set, else no active height).
+  // Mismatch rows are visually tinted but their checkbox stays interactive — users
+  // can still duplicate/delete them. Preview and print paths filter them out.
+  const activeTapeH = (tabName === 'maker') ? getActiveTapeHeight() : null;
+
+  ts.rows.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.dataset.uid = row.uid;
+
+    // Compute "matches active tape" for this row (Label Maker only).
+    // If there's no active tape height (printer disconnected and no override),
+    // we treat all rows as "not currently printable" — they show tinted, can be
+    // selected for organizing, but won't appear in preview or print until a
+    // tape source becomes known.
+    const matchesTape = (tabName !== 'maker') ? true :
+                        (activeTapeH !== null &&
+                         Math.abs((row.h || 0) - activeTapeH) < 0.01);
+    if (tabName === 'maker' && !matchesTape) tr.classList.add('row-unprintable');
+
+    // Determine which option is "selected" in the Format dropdown
+    let fmtSelected = 'custom';
+    if (row.formatName && row.formatName !== 'custom') {
+      const match = ts.presets.find(p => p.name === row.formatName && p.w === row.w && p.h === row.h);
+      if (match) fmtSelected = 'preset:' + match.id;
+    }
+    const fmtOptions =
+      `<option value="custom" ${fmtSelected==='custom'?'selected':''}>Custom</option>` +
+      ts.presets.map(p =>
+        `<option value="preset:${p.id}" ${fmtSelected==='preset:'+p.id?'selected':''}>${escapeHtml(p.name)} (${p.w}×${p.h})</option>`
+      ).join('');
+
+    // Color cell (Label Maker only)
+    let colorCellHtml = '';
+    if (tabName === 'maker') {
+      const colorOptions = Object.entries(TAPE_COLORS).map(([key, c]) =>
+        `<option value="${key}" ${row.color === key ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
+      ).join('');
+      colorCellHtml = `<td class="color-cell"><select class="color-sel">${colorOptions}</select></td>`;
+    }
+
+    // Slice 4: checkboxes are ALWAYS enabled. Per-row Print button is disabled when
+    // the row doesn't match the active tape (or no active tape).
+    const printBtnDisabled = (tabName === 'maker' && !matchesTape) ? 'disabled' : '';
+    const printBtnTitle = (tabName === 'maker' && !matchesTape)
+      ? (activeTapeH === null
+          ? `title="No active tape \u2014 connect printer or set Preview override"`
+          : `title="Active tape is ${activeTapeH}mm but this label needs ${row.h}mm"`)
+      : 'title="Print this row"';
+    tr.innerHTML = `
+      <td><input type="checkbox" class="row-sel" ${row.selected ? 'checked' : ''} /></td>
+      <td class="id-cell">${row.id || '...'}</td>
+      <td><textarea class="line1" rows="1" placeholder="Primary">${escapeHtml(row.line1 || '')}</textarea></td>
+      <td><textarea class="line2" rows="1" placeholder="Secondary">${escapeHtml(row.line2 || '')}</textarea></td>
+      <td><input class="line3" type="text" placeholder="Tertiary" value="${escapeHtml(row.line3 || '')}" /></td>
+      <td class="qr-toggle"><input type="checkbox" class="qr-chk" ${row.qr ? 'checked' : ''} /></td>
+      <td class="copies"><input type="number" class="copies-in" min="1" max="200" value="${row.copies || 1}" /></td>
+      <td class="size-cell">
+        <input type="number" class="w-in" min="4" step="0.1" value="${row.w}" /><span class="x">×</span><input type="number" class="h-in" min="4" step="0.1" value="${row.h}" />
+      </td>
+      ${colorCellHtml}
+      <td class="fmt-cell"><select class="fmt-sel">${fmtOptions}</select></td>
+      <td class="actions">
+        <button class="print-row-btn" ${printBtnTitle} ${printBtnDisabled}>⎙</button>
+        <button class="dup-btn" title="Duplicate">⎘</button>
+        <button class="del-btn" title="Delete">✕</button>
+      </td>
+    `;
+    tb.appendChild(tr);
+
+    // ---- Wire events ----
+    const onText = (field) => (e) => { row[field] = e.target.value; persistTabRows(tabName); schedulePreview(); };
+    tr.querySelector('.line1').addEventListener('input', onText('line1'));
+    tr.querySelector('.line2').addEventListener('input', onText('line2'));
+    tr.querySelector('.line3').addEventListener('input', onText('line3'));
+    tr.querySelector('.row-sel').addEventListener('change', e => {
+      row.selected = e.target.checked; updateStickyPrint(); schedulePreview();
+    });
+    tr.querySelector('.qr-chk').addEventListener('change', e => { row.qr = e.target.checked; persistTabRows(tabName); logRow(row); schedulePreview(); });
+    tr.querySelector('.copies-in').addEventListener('input', e => { row.copies = Math.max(1, parseInt(e.target.value) || 1); persistTabRows(tabName); updateMeta(); schedulePreview(); updateStickyPrint(); });
+    tr.querySelector('.w-in').addEventListener('input', e => {
+      const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) row.w = v;
+      row.formatName = 'custom';
+      persistTabRows(tabName); logRow(row); schedulePreview(); renderRowFormatCell(tr, row, ts);
+    });
+    tr.querySelector('.h-in').addEventListener('input', e => {
+      const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) row.h = v;
+      row.formatName = 'custom';
+      persistTabRows(tabName); logRow(row); schedulePreview(); renderRowFormatCell(tr, row, ts);
+      // Height change may change printability — re-render the row
+      renderTable(tabName);
+    });
+    tr.querySelector('.fmt-sel').addEventListener('change', e => {
+      const v = e.target.value;
+      if (v === 'custom') {
+        row.formatName = 'custom';
+      } else if (v.startsWith('preset:')) {
+        const pid = v.slice(7);
+        const p = ts.presets.find(pp => pp.id === pid);
+        if (p) {
+          row.w = p.w; row.h = p.h; row.formatName = p.name;
+          tr.querySelector('.w-in').value = p.w;
+          tr.querySelector('.h-in').value = p.h;
+        }
+      }
+      persistTabRows(tabName); logRow(row); schedulePreview();
+      if (tabName === 'maker') renderTable(tabName);
+    });
+    const colorSel = tr.querySelector('.color-sel');
+    if (colorSel) colorSel.addEventListener('change', e => {
+      row.color = e.target.value;
+      persistTabRows(tabName); schedulePreview();
+    });
+    tr.querySelector('.dup-btn').addEventListener('click', () => duplicateRow(tabName, row.uid));
+    tr.querySelector('.del-btn').addEventListener('click', () => deleteRow(tabName, row.uid));
+    const printRowBtn = tr.querySelector('.print-row-btn');
+    if (printRowBtn) printRowBtn.addEventListener('click', () => printSingleRow(tabName, row.uid));
+
+    // Auto-grow textareas
+    tr.querySelectorAll('textarea').forEach(ta => {
+      const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(80, ta.scrollHeight) + 'px'; };
+      ta.addEventListener('input', grow); grow();
+    });
+  });
+  updateStickyPrint();
+}
+
+/* Just refreshes the Format cell's selected option (used after W/H edits) */
+function renderRowFormatCell(tr, row, ts) {
+  const sel = tr.querySelector('.fmt-sel'); if (!sel) return;
+  // The user edited dimensions directly → format is "custom"
+  sel.value = 'custom';
+}
+
+/* ---- PRESET RENDERING + MANAGEMENT ---- */
+function renderPresets(tabName) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const listEl = el(tabName + 'PresetList');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  if (ts.presets.length === 0) {
+    listEl.innerHTML = `<div class="preset-empty">No saved presets yet. Use the inputs above and click <b>Save as preset</b>.</div>`;
+    return;
+  }
+  ts.presets.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'preset-row';
+    row.innerHTML = `
+      <span class="pname" title="${escapeHtml(p.desc || '')}">${escapeHtml(p.name)}</span>
+      <span class="pdim">${p.w}×${p.h}mm</span>
+      <span class="pdesc" title="${escapeHtml(p.desc || '')}">${escapeHtml(p.desc || '')}</span>
+      <button class="apply-btn" title="Use this for new labels">Use</button>
+      <button class="del-preset-btn" title="Delete preset">✕</button>
+    `;
+    row.querySelector('.apply-btn').addEventListener('click', () => applyPreset(tabName, p.id));
+    row.querySelector('.del-preset-btn').addEventListener('click', () => deletePreset(tabName, p.id));
+    listEl.appendChild(row);
+  });
+}
+
+function applyPreset(tabName, presetId) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const p = ts.presets.find(pp => pp.id === presetId); if (!p) return;
+  ts.formatW = p.w; ts.formatH = p.h;
+  if (tabName === 'maker') { el('makerW').value = p.w; el('makerH').value = p.h; }
+  else if (tabName === 'printer') { el('printerW').value = p.w; el('printerH').value = p.h; }
+  persistConfig();
+}
+
+async function savePreset(tabName) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const nameEl = el(tabName + 'PresetName');
+  const descEl = el(tabName + 'PresetDesc');
+  const w = (tabName === 'maker') ? parseFloat(el('makerW').value) : parseFloat(el('printerW').value);
+  const h = (tabName === 'maker') ? parseFloat(el('makerH').value) : parseFloat(el('printerH').value);
+  const name = (nameEl.value || '').trim();
+  if (!name) { alert('Give the preset a name.'); nameEl.focus(); return; }
+  if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) { alert('Set valid width and height first.'); return; }
+  if (ts.presets.some(p => p.name === name)) {
+    if (!confirm(`A preset named "${name}" exists. Overwrite?`)) return;
+    ts.presets = ts.presets.filter(p => p.name !== name);
+  }
+  const preset = { id: uid(), name, desc: (descEl.value || '').trim(), w, h };
+  ts.presets.push(preset);
+  await persistTabPresets(tabName);
+  nameEl.value = ''; descEl.value = '';
+  renderPresets(tabName);
+  renderTable(tabName);  // refresh format selects in rows
+}
+
+async function deletePreset(tabName, presetId) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const p = ts.presets.find(pp => pp.id === presetId); if (!p) return;
+  if (!confirm(`Delete preset "${p.name}"? Rows using these dimensions keep them; their Format column just shows "custom".`)) return;
+  ts.presets = ts.presets.filter(pp => pp.id !== presetId);
+  await persistTabPresets(tabName);
+  renderPresets(tabName);
+  // After delete: rows with formatName === p.name fall back to "custom" in the dropdown
+  // (dimensions stay). renderTable() will re-evaluate the selected option.
+  renderTable(tabName);
+}
+
+/* ---- PREVIEW ---- */
+let previewTimer = null;
+function schedulePreview() {
+  if (previewTimer) clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    const ts = activeTabState();
+    if (ts) ts.rows.forEach(logRow);
+    renderPreview();
+    updateMeta();
+  }, 200);
+}
+
+function renderPreview() {
+  if (state.activeTab === 'maker') renderMakerPreview();
+  else if (state.activeTab === 'printer') renderPrinterPreview();
+}
+
+function renderMakerPreview() {
+  const body = el('makerPreviewBody'); if (!body) return;
+  body.innerHTML = '';
+  // Slice 4: preview shows only selected rows whose height matches the active tape.
+  // Active tape = connected cartridge OR manual override. If neither set, empty.
+  const activeH = getActiveTapeHeight();
+  const selected = state.maker.rows.filter(r => r.selected);
+  let printable = [];
+  if (activeH !== null) {
+    printable = selected.filter(r => Math.abs(r.h - activeH) < 0.01);
+  }
+
+  if (selected.length === 0) {
+    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">Select rows in the table to preview them here.</div>`;
+    el('makerPreviewInfo').textContent = '— mm × — mm';
+    return;
+  }
+  if (activeH === null) {
+    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">Connect a printer or set <b>Preview as</b> in the printer strip to see selected labels.</div>`;
+    el('makerPreviewInfo').textContent = `${selected.length} selected · no active tape`;
+    return;
+  }
+  if (printable.length === 0) {
+    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">${selected.length} row${selected.length===1?'':'s'} selected but none match the active ${activeH}mm tape.</div>`;
+    el('makerPreviewInfo').textContent = `${selected.length} selected · 0 of ${activeH}mm`;
+    return;
+  }
+
+  // Sort by color within active height, table order within color.
+  // (Active height is uniform across all printable rows, so we only need
+  // color + table order for ordering within this slice.)
+  const tableOrder = new Map();
+  state.maker.rows.forEach((r, i) => tableOrder.set(r.uid, i));
+  const colorKeys = Object.keys(TAPE_COLORS);
+  const colorOrder = new Map();
+  colorKeys.forEach((k, i) => colorOrder.set(k, i));
+  printable.sort((a, b) => {
+    const ca = colorOrder.get(a.color || 'white-black') ?? 999;
+    const cb = colorOrder.get(b.color || 'white-black') ?? 999;
+    if (ca !== cb) return ca - cb;
+    return (tableOrder.get(a.uid) ?? 0) - (tableOrder.get(b.uid) ?? 0);
+  });
+
+  const stage = document.createElement('div');
+  stage.className = 'single-stage';
+  body.appendChild(stage);
+  printable.slice(0, 16).forEach(row => {
+    const frame = document.createElement('div');
+    frame.className = 'single-frame';
+    const card = buildLabelCard(row, { withShadow: true, tapeColor: row.color || 'white-black' });
+    frame.appendChild(card);
+    const dims = effectiveDimsForRow(row);
+    const colorName = (TAPE_COLORS[row.color || ''] || {}).name || '';
+    const cap = document.createElement('div');
+    cap.className = 'caption';
+    cap.textContent = `${row.id} · ${dims.w}×${dims.h}mm · ×${row.copies}${dims.qrOnly ? ' · QR-only' : ''}${colorName ? ' · ' + colorName : ''}`;
+    frame.appendChild(cap);
+    stage.appendChild(frame);
+    requestAnimationFrame(() => card._fit && card._fit());
+  });
+  if (printable.length > 16) {
+    const more = document.createElement('div');
+    more.style.cssText = 'width:100%;text-align:center;color:var(--muted);font-size:11px;font-family:Archivo;text-transform:uppercase;letter-spacing:0.1em;margin-top:8px;';
+    more.textContent = `+ ${printable.length - 16} more`;
+    body.appendChild(more);
+  }
+  const totalLabels = printable.reduce((s, r) => s + Math.max(1, r.copies || 1), 0);
+  const skipped = selected.length - printable.length;
+  el('makerPreviewInfo').textContent =
+    `${printable.length} of ${selected.length} selected · ${totalLabels} labels at ${activeH}mm` +
+    (skipped > 0 ? ` · ${skipped} skipped (wrong height)` : '');
+}
+
+function renderPrinterPreview() {
+  const body = el('printerPreviewBody'); if (!body) return;
+  body.innerHTML = '';
+  // Slice 3: preview only shows SELECTED rows. Empty preview when nothing is selected.
+  const selectedRows = state.printer.rows.filter(r => r.selected);
+  if (selectedRows.length === 0) {
+    body.innerHTML = `<div style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">Select rows in the table to preview the sheet layout.</div>`;
+    el('printerPreviewInfo').textContent = '— pages';
+    return;
+  }
+  const isLandscape = state.printer.orientation === 'landscape';
+  const pageW = isLandscape ? 279.4 : 215.9;
+  const pageH = isLandscape ? 215.9 : 279.4;
+  const margin = parseFloat(state.printer.pageMargin) || 0;
+  const gapH = parseFloat(state.printer.gapH) || 0;
+  const gapV = parseFloat(state.printer.gapV) || 0;
+
+  const items = expandPrinterQueue(selectedRows);
+  const pages = paginate(pageW, pageH, margin, gapH, gapV, items);
+
+  el('printerPreviewInfo').textContent = `${pages.length} page${pages.length===1?'':'s'} · ${items.length} labels`;
+
+  const stack = document.createElement('div');
+  stack.className = 'sheet-stack';
+  body.appendChild(stack);
+
+  pages.forEach((page, pgIdx) => {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet sheet-letter';
+    const scale = Math.min(1, 700 / (pageW * MM_TO_PX));
+    sheet.style.transform = `scale(${scale})`;
+    sheet.style.transformOrigin = 'top left';
+    sheet.style.width = (pageW * MM_TO_PX) + 'px';
+    sheet.style.height = (pageH * MM_TO_PX) + 'px';
+    const wrap = document.createElement('div');
+    wrap.style.width = (pageW * MM_TO_PX * scale) + 'px';
+    wrap.style.height = (pageH * MM_TO_PX * scale) + 'px';
+    wrap.style.position = 'relative';
+    wrap.appendChild(sheet);
+    stack.appendChild(wrap);
+
+    const inner = document.createElement('div');
+    inner.style.position = 'absolute';
+    inner.style.left = (margin * MM_TO_PX) + 'px';
+    inner.style.top  = (margin * MM_TO_PX) + 'px';
+    inner.style.width = ((pageW - 2*margin) * MM_TO_PX) + 'px';
+    inner.style.height = ((pageH - 2*margin) * MM_TO_PX) + 'px';
+    sheet.appendChild(inner);
+
+    const cards = [];
+    page.forEach(it => {
+      const card = buildLabelCard(it.row);  // no tape tint — paper output
+      card.style.position = 'absolute';
+      card.style.left = (it.x * MM_TO_PX) + 'px';
+      card.style.top  = (it.y * MM_TO_PX) + 'px';
+      inner.appendChild(card);
+      cards.push(card);
+    });
+    requestAnimationFrame(() => cards.forEach(c => c._fit && c._fit()));
+
+    const pn = document.createElement('div');
+    pn.className = 'sheet-page-num';
+    pn.textContent = `PAGE ${pgIdx + 1} / ${pages.length} · ${page.length} LABELS`;
+    sheet.appendChild(pn);
+  });
+
+  // Capacity hint
+  const hint = el('capacityHint');
+  if (hint) {
+    const dims = { w: state.printer.formatW, h: state.printer.formatH };
+    const innerW = pageW - 2*margin, innerH = pageH - 2*margin;
+    const cols = Math.max(0, Math.floor((innerW + gapH) / (dims.w + gapH)));
+    const rowsPerPage = Math.max(0, Math.floor((innerH + gapV) / (dims.h + gapV)));
+    hint.innerHTML = `≈ <b>${cols*rowsPerPage}</b> default-sized labels per page (${cols}×${rowsPerPage}) · ${items.length} queued → <b>${pages.length}</b> page${pages.length===1?'':'s'}`;
+  }
+}
+
+function paginate(pageW, pageH, marginMm, gapH, gapV, items) {
+  const innerW = pageW - 2*marginMm;
+  const innerH = pageH - 2*marginMm;
+  const pages = [];
+  let curPage = [];
+  let cursorX = 0, cursorY = 0, rowH = 0;
+  let lastH = null;  // Slice 4: force row-wrap when height changes
+  for (const it of items) {
+    if (it.w > innerW || it.h > innerH) { it.skipped = true; continue; }
+    // Force a row break when this item's height differs from the current row's height.
+    // This is what makes "scissor cuts straight across" work: every visual row
+    // contains labels of exactly one height.
+    const heightChanged = (lastH !== null && Math.abs(it.h - lastH) > 0.01);
+    if (heightChanged || cursorX + it.w > innerW + 0.001) {
+      cursorX = 0;
+      cursorY += rowH + gapV;
+      rowH = 0;
+    }
+    if (cursorY + it.h > innerH + 0.001) {
+      pages.push(curPage); curPage = [];
+      cursorX = 0; cursorY = 0; rowH = 0;
+    }
+    curPage.push({ ...it, x: cursorX, y: cursorY });
+    cursorX += it.w + gapH;
+    if (it.h > rowH) rowH = it.h;
+    lastH = it.h;
+  }
+  if (curPage.length) pages.push(curPage);
+  return pages;
+}
+
+function expandPrinterQueue(rowsOverride) {
+  const items = [];
+  const src = rowsOverride || state.printer.rows;
+  for (const row of src) {
+    const dims = effectiveDimsForRow(row);
+    const n = Math.max(1, row.copies || 1);
+    for (let i = 0; i < n; i++) items.push({ row, w: dims.w, h: dims.h, _tableOrder: state.printer.rows.indexOf(row) });
+  }
+  // Slice 4: sort by height DESCENDING (tallest first → top of page), then by
+  // table order. This produces clean horizontal scissor lines.
+  items.sort((a, b) => {
+    if (Math.abs(a.h - b.h) > 0.01) return b.h - a.h;   // taller first
+    return a._tableOrder - b._tableOrder;
+  });
+  return items;
+}
+
+/* ---- META ---- */
+function updateMeta() {
+  el('usedCount').textContent = state.used.size;
+  const ts = activeTabState();
+  let queue = 0;
+  if (ts) queue = ts.rows.reduce((s, r) => s + Math.max(1, r.copies || 1), 0);
+  el('queueCount').textContent = queue;
+  // Stats tab
+  const ru = el('statsUsed'); if (ru) ru.textContent = state.used.size;
+  const rm = el('statsMakerRows'); if (rm) rm.textContent = state.maker.rows.length;
+  const rp = el('statsPrinterRows'); if (rp) rp.textContent = state.printer.rows.length;
+}
+
+/* ---- IMPORT / EXPORT ---- */
+function buildExport() {
+  return {
+    schema: SCHEMA_VERSION,
+    exported: new Date().toISOString(),
+    items: Object.values(state.registry).sort((a,b) => (a.created || '').localeCompare(b.created || '')),
+  };
+}
+function exportJson() {
+  const data = buildExport();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, `stowtrace-inventory-${tsForFilename()}.json`);
+}
+function exportCsv() {
+  const items = buildExport().items;
+  const header = ['id','line1','line2','line3','qr','qr_payload','w_mm','h_mm','format_name','created','updated'];
+  const rows = items.map(it => [
+    it.id, (it.lines && it.lines[0]) || '', (it.lines && it.lines[1]) || '', (it.lines && it.lines[2]) || '',
+    it.qr ? '1' : '0', it.qr_payload || '', it.w_mm || '', it.h_mm || '', it.format_name || '', it.created || '', it.updated || '',
+  ].map(csvCell).join(','));
+  const csv = [header.join(','), ...rows].join('\n');
+  downloadBlob(new Blob([csv], {type:'text/csv'}), `stowtrace-inventory-${tsForFilename()}.csv`);
+}
+function csvCell(v) { v = String(v ?? ''); if (/[",\n]/.test(v)) return '"' + v.replace(/"/g, '""') + '"'; return v; }
+function tsForFilename() { return new Date().toISOString().replace(/[:.]/g,'-').slice(0,19); }
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function importJson(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.schema || !data.schema.startsWith('stowtrace-inventory/')) { alert('Not a stowtrace-inventory file.'); return; }
+    if (!Array.isArray(data.items)) { alert('No items[] array.'); return; }
+    let added = 0, skipped = 0;
+    for (const it of data.items) {
+      if (!it.id) continue;
+      if (state.registry[it.id]) { skipped++; continue; }
+      state.registry[it.id] = {
+        id: it.id, lines: it.lines || [],
+        qr: it.qr !== false, qr_payload: it.qr_payload || it.id,
+        w_mm: it.w_mm, h_mm: it.h_mm, format_name: it.format_name || it.label_format || 'custom',
+        created: it.created || new Date().toISOString(), updated: it.updated || new Date().toISOString(),
+      };
+      state.used.add(it.id); added++;
+    }
+    await persistUsed(); await persistRegistry();
+    alert(`Import complete.\nAdded: ${added}\nSkipped (already exist): ${skipped}`);
+    updateMeta();
+  } catch (e) { alert('Import failed: ' + e.message); }
+}
+
+/* ============================================================================
+   SLICE 6 — Backup & Restore
+   ============================================================================
+   downloadBackup       — GET /api/system/backup, save to browser downloads
+   backupToDrive        — POST /api/system/backup-to-drive (writes to /mnt/backup)
+   restoreFromBackup    — POST /api/system/restore (merges into current state)
+   refreshBackupDriveStatus — GET /api/system/backup-drive-status, enable/disable
+                              the "Save to USB Drive" button.
+   Backend already enforces merge semantics; the frontend just needs to call
+   the endpoints and reload local state on success.
+*/
+
+async function downloadBackup() {
+  const btn = el('backupDownloadBtn');
+  const original = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '⌛ Building…'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/system/backup', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    // Extract filename from Content-Disposition if present, else fall back.
+    let filename = 'inv-backup.json';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    if (m) filename = m[1];
+    downloadBlob(blob, filename);
+  } catch (e) {
+    alert('Backup failed: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = original; btn.disabled = false; }
+  }
+}
+
+async function backupToDrive() {
+  const btn = el('backupToDriveBtn');
+  const original = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '⌛ Writing…'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/system/backup-to-drive', { method: 'POST' });
+    const j = await r.json();
+    if (!j.ok) {
+      alert('Save to drive failed:\n' + (j.detail || j.error || 'unknown'));
+    } else {
+      alert(`Backup saved to drive:\n${j.filename}\n${(j.size_bytes/1024).toFixed(1)} KB`);
+    }
+  } catch (e) {
+    alert('Save to drive failed: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = original; btn.disabled = false; }
+    refreshBackupDriveStatus();   // free-space changed
+  }
+}
+
+async function restoreFromBackup(file) {
+  if (!file) return;
+  let data;
+  try {
+    const text = await file.text();
+    data = JSON.parse(text);
+  } catch (e) {
+    alert('Restore failed: file is not valid JSON.\n' + e.message);
+    return;
+  }
+  if (!data || !data.schema) {
+    alert('Restore failed: file is missing the schema field. Pick a backup or inventory file from this app.');
+    return;
+  }
+  // Show the user a confirm with a preview of what they're about to restore
+  let preview = '';
+  if (data.schema.startsWith('stowtrace-backup/')) {
+    const itemCount = data.data && data.data['st:registry']
+      ? Object.keys(data.data['st:registry']).length : 0;
+    const tapePresets = (data.data && Array.isArray(data.data['st:tape_presets']))
+      ? data.data['st:tape_presets'].length : 0;
+    const sheetPresets = (data.data && Array.isArray(data.data['st:sheet_presets']))
+      ? data.data['st:sheet_presets'].length : 0;
+    preview = `Full backup from ${data.hostname || 'unknown host'} (${data.exported_at || 'unknown date'})\n` +
+              `• ${itemCount} inventory items\n` +
+              `• ${tapePresets} tape presets, ${sheetPresets} sheet presets`;
+  } else if (data.schema.startsWith('stowtrace-inventory/')) {
+    const n = Array.isArray(data.items) ? data.items.length : 0;
+    preview = `Inventory export (legacy format)\n• ${n} items`;
+  } else {
+    alert(`Restore failed: unsupported schema "${data.schema}".`);
+    return;
+  }
+  if (!confirm(`Restore from this backup?\n\n${preview}\n\nOnly items NOT currently in your registry will be added. Your existing data is never overwritten.`)) {
+    return;
+  }
+
+  const btn = el('restoreBtn');
+  const original = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '⌛ Restoring…'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/system/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      alert('Restore failed:\n' + (j.error || JSON.stringify(j)));
+      return;
+    }
+    const lines = [
+      'Restore complete.',
+      `• Items added: ${j.added_items}`,
+      `• Items skipped (already present): ${j.skipped_items}`,
+    ];
+    if (j.added_presets || j.skipped_presets) {
+      lines.push(`• Presets added: ${j.added_presets}, skipped: ${j.skipped_presets}`);
+    }
+    alert(lines.join('\n'));
+    // Reload local state from backend so the UI reflects the changes
+    await loadAll();
+    renderAll();
+  } catch (e) {
+    alert('Restore failed: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = original; btn.disabled = false; }
+  }
+}
+
+async function refreshBackupDriveStatus() {
+  const statusEl = el('backupDriveStatus');
+  const btn = el('backupToDriveBtn');
+  if (!statusEl || !btn) return;
+  try {
+    const r = await fetch('/api/system/backup-drive-status', { cache: 'no-store' });
+    const j = await r.json();
+    if (j.mounted) {
+      const freeGB = (j.free_bytes / 1024 / 1024 / 1024).toFixed(1);
+      const totalGB = (j.total_bytes / 1024 / 1024 / 1024).toFixed(1);
+      statusEl.innerHTML = `<span style="color:#1a5d1a;">●</span> USB drive available at ${escapeHtml(j.path)} — ${freeGB} GB free of ${totalGB} GB`;
+      btn.disabled = false;
+      btn.title = 'Save a backup file to the USB drive at ' + j.path;
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--muted);">○</span> No USB drive mounted. Plug in a drive (formatted ext4 with label <code>st-backup</code>) to enable Save to Drive.`;
+      btn.disabled = true;
+      btn.title = 'Plug in a USB drive to enable';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Could not check for USB drive: ' + e.message;
+    btn.disabled = true;
+  }
+}
+
+/* ---- TAPE PRINTING (Brother PT-P700 via Pi backend) ---- */
+const TAPE_DPI = 180;
+const TAPE_HEIGHTS_PX = { 6: 32, 9: 50, 12: 70, 18: 112, 24: 128 };
+const TAPE_CUT_CLEAR_MM = 4.0;
+const TAPE_EDGE_SAFE_MM = 0.3;
+
+function mmToTapePx(mm) { return Math.round(mm * TAPE_DPI / 25.4); }
+
+/* ---- SLICE 4: TAPE HEIGHT RESOLUTION ----
+   The "active tape height" drives which Maker rows show up in preview and which
+   are printable. Priority:
+     1. Connected printer's cartridge (status.tape_width_mm) — always wins when connected
+     2. Manual override (state.tapeOverrideMm) — preview-only, used when disconnected
+     3. null — no active height; preview will be empty
+   The override dropdown in the printer-status strip is ignored when a printer is connected. */
+function getActiveTapeHeight() {
+  if (_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm) {
+    return _lastPrinterStatus.tape_width_mm;
+  }
+  if (state.tapeOverrideMm) {
+    const n = parseInt(state.tapeOverrideMm, 10);
+    if (!isNaN(n) && TAPE_HEIGHTS_PX[n]) return n;
+  }
+  return null;
+}
+
+/* True if the user has a real connected printer (vs preview-only override). */
+function isPrinterReady() {
+  return !!(_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm);
+}
+
+function resolveMaxPrintPx(effectiveWidth, printerStatus) {
+  if (printerStatus && printerStatus.tape_width_mm === effectiveWidth && printerStatus.max_print_px) {
+    return printerStatus.max_print_px;
+  }
+  return TAPE_HEIGHTS_PX[effectiveWidth] || null;
+}
+
+function renderRowToTapePng(row, tapeWidthMm = 12, maxPrintPx = null) {
+  return new Promise((resolve, reject) => {
+    const tapeHeightPx = maxPrintPx || TAPE_HEIGHTS_PX[tapeWidthMm] || 70;
+    // Use row.w for length, but if QR-only square, use the smaller dimension
+    const dims = effectiveDimsForRow(row);
+    const tapeLengthPx = mmToTapePx(dims.w);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = tapeLengthPx;
+    canvas.height = tapeHeightPx;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000000';
+
+    const cutClearPx = mmToTapePx(TAPE_CUT_CLEAR_MM);
+    const edgeSafePx = mmToTapePx(TAPE_EDGE_SAFE_MM);
+    const contentLeft = cutClearPx;
+    const contentRight = tapeLengthPx - cutClearPx;
+    const contentTop = edgeSafePx;
+    const contentBottom = tapeHeightPx - edgeSafePx;
+    const contentWidth = Math.max(0, contentRight - contentLeft);
+    const contentHeight = contentBottom - contentTop;
+
+    const drawQrAndFinalize = (qrImgOrCv, qrX, qrY, qrSide) => {
+      if (qrImgOrCv && qrSide > 0) ctx.drawImage(qrImgOrCv, qrX, qrY, qrSide, qrSide);
+      // 1-bit threshold
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const v = (d[i] + d[i+1] + d[i+2]) / 3;
+        const bw = v < 200 ? 0 : 255;
+        d[i] = d[i+1] = d[i+2] = bw; d[i+3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+
+    const drawQrFromTmp = (qrSide, qrX, qrY, cb) => {
+      const payload = buildQrPayload(row);
+      const tmp = document.createElement('div');
+      tmp.style.cssText = 'position:absolute;left:-99999px;top:-99999px;';
+      document.body.appendChild(tmp);
+      try {
+        new QRCode(tmp, { text: payload || ' ', width: qrSide, height: qrSide, correctLevel: QRCode.CorrectLevel.M });
+        const qrCanvas = tmp.querySelector('canvas');
+        const qrImg = tmp.querySelector('img');
+        if (qrCanvas) { document.body.removeChild(tmp); cb(qrCanvas); }
+        else if (qrImg) {
+          const img = new Image();
+          img.onload = () => { document.body.removeChild(tmp); cb(img); };
+          img.onerror = () => { document.body.removeChild(tmp); reject(new Error('QR render failed')); };
+          img.src = qrImg.src;
+        } else { document.body.removeChild(tmp); cb(null); }
+      } catch (e) {
+        try { document.body.removeChild(tmp); } catch {}
+        reject(e);
+      }
+    };
+
+    // QR-only case: full-height square QR centered
+    if (dims.qrOnly) {
+      const qrSide = Math.min(contentWidth, contentHeight);
+      const qrX = contentLeft + (contentWidth - qrSide) / 2;
+      const qrY = contentTop + (contentHeight - qrSide) / 2;
+      drawQrFromTmp(qrSide, qrX, qrY, (src) => drawQrAndFinalize(src, qrX, qrY, qrSide));
+      return;
+    }
+
+    const interGapPx = mmToTapePx(0.8);
+    const qrSidePx = row.qr ? contentHeight : 0;
+    const qrLeftPx = row.qr ? (contentRight - qrSidePx) : contentRight;
+    const textLeftPx = contentLeft;
+    const textRightPx = row.qr ? (qrLeftPx - interGapPx) : contentRight;
+    const textWidthPx = textRightPx - textLeftPx;
+    const textTopPx = contentTop;
+    const textHeightPx = contentHeight;
+
+    if (textWidthPx <= 0) { reject(new Error('Label too small for QR + text at this tape width')); return; }
+
+    const lines = [];
+    if (row.line1 && row.line1.trim()) lines.push({ text: row.line1, weight: 1.0, font: '900 Xpx Archivo', upper: true });
+    if (row.line2 && row.line2.trim()) lines.push({ text: row.line2, weight: 0.62, font: '600 Xpx Archivo', upper: false });
+    if (row.line3 && row.line3.trim()) lines.push({ text: row.line3, weight: 0.50, font: '500 Xpx "JetBrains Mono"', upper: true });
+    if (lines.length === 0) lines.push({ text: row.id || '?????', weight: 1.0, font: '900 Xpx Archivo', upper: true });
+
+    const totalWeight = lines.reduce((s,l) => s + l.weight, 0);
+    const fittedLines = lines.map(line => {
+      const allocH = (line.weight / totalWeight) * textHeightPx;
+      let lo = 4, hi = textHeightPx * 2, best = lo;
+      const text = line.upper ? line.text.toUpperCase() : line.text;
+      for (let i = 0; i < 22; i++) {
+        const mid = (lo + hi) / 2;
+        ctx.font = line.font.replace('X', mid);
+        const m = ctx.measureText(text);
+        const ascent = m.actualBoundingBoxAscent || mid * 0.8;
+        const descent = m.actualBoundingBoxDescent || mid * 0.2;
+        const h = ascent + descent;
+        if (m.width <= textWidthPx && h <= allocH) { best = mid; lo = mid; } else { hi = mid; }
+      }
+      return { text, font: line.font.replace('X', best), height: best };
+    });
+
+    const totalDrawnH = fittedLines.reduce((s,l) => s + l.height, 0);
+    let yCursor = textTopPx + (textHeightPx - totalDrawnH) / 2;
+    ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+    for (const fl of fittedLines) {
+      ctx.font = fl.font;
+      ctx.fillText(fl.text, textLeftPx + textWidthPx / 2, yCursor);
+      yCursor += fl.height;
+    }
+
+    if (row.qr) {
+      drawQrFromTmp(qrSidePx, qrLeftPx, contentTop, (src) =>
+        drawQrAndFinalize(src, qrLeftPx, contentTop, qrSidePx)
+      );
+    } else {
+      drawQrAndFinalize(null, 0, 0, 0);
+    }
+  });
+}
+
+/* ---- PER-ROW PRINT (tab-aware) ---- */
+/* ============================================================================
+   SLICE 5 — REPRINT LABEL flow
+   ============================================================================
+   Click "Reprint Label" → inline scan card opens (matches inventory app style)
+   → camera previews with targeting box + corner brackets + dwell arc
+   → QR locked in for 250ms triggers handleScannedId → row populated → card closes.
+   On successful print of a reprint row, PUT updated text lines to /api/items/<id>.
+*/
+
+/* Extract the label ID from a scanned QR payload. Mirrors the inventory app's
+   normalizeQrPayload — handles all 4 payload modes the forge can produce:
+   - "X7K2M"           (id)
+   - "X7K2M|Capacitor" (combined)
+   - "{...json...}"    (json)
+   - "https://.../X7K2M" (url)
+*/
+function normalizeQrPayload(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (s.startsWith('{')) {
+    try {
+      const j = JSON.parse(s);
+      if (j && typeof j.id === 'string' && j.id.length >= 3) return j.id.toUpperCase();
+    } catch (e) {}
+  }
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    try {
+      const u = new URL(s);
+      const last = u.pathname.split('/').filter(x => x).pop();
+      if (last && /^[A-Z0-9]{3,8}$/i.test(last)) return last.toUpperCase();
+    } catch (e) {}
+  }
+  if (s.includes('|')) {
+    const left = s.split('|')[0].trim();
+    if (/^[A-Z0-9]{3,8}$/i.test(left)) return left.toUpperCase();
+  }
+  if (/^[A-Z0-9]{3,8}$/i.test(s)) return s.toUpperCase();
+  return null;
+}
+
+/* Scanner state — uses dwell-time pattern from inventory app */
+const SCAN_DWELL_MS         = 250;   // QR must be in target box this long to lock
+const SCAN_DWELL_GRACE_MS   = 400;   // grace window if camera drops a frame
+const SCAN_TARGET_INSET     = 0.18;  // 18% margin → 64% center box
+const SCAN_DOWNSCALE_MAX_DIM= 960;   // process frames at <=960px wide for speed
+const SCAN_MAX_DETECT       = 3;     // multi-QR attempts per frame
+
+const _scan = {
+  stream: null,
+  rafId: null,
+  active: false,
+  tabName: null,                 // which tab requested the reprint
+  dwellId: null,
+  dwellStart: 0,
+  dwellLastSeen: 0,
+  cooldownUntil: 0,
+};
+
+/* Returns true if a QR's center is inside the targeting box. The visible video
+   uses object-fit:cover on a square frame, so we use the smaller dimension as
+   the reference for both axes (matches inventory app exactly). */
+function _qrInTargetBox(code, videoW, videoH) {
+  const loc = code.location;
+  const cx = (loc.topLeftCorner.x + loc.bottomRightCorner.x) / 2;
+  const cy = (loc.topLeftCorner.y + loc.bottomRightCorner.y) / 2;
+  const minDim = Math.min(videoW, videoH);
+  const cropX = (videoW - minDim) / 2;
+  const cropY = (videoH - minDim) / 2;
+  const relX = cx - cropX;
+  const relY = cy - cropY;
+  const lo = minDim * SCAN_TARGET_INSET;
+  const hi = minDim * (1 - SCAN_TARGET_INSET);
+  return relX >= lo && relX <= hi && relY >= lo && relY <= hi;
+}
+
+/* Multi-QR detect (mask painted between passes so we don't re-find the same one) */
+function _detectAllQrs(imageData, maxAttempts) {
+  if (typeof jsQR === 'undefined') return [];
+  const found = [];
+  const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const code = jsQR(data, width, height, { inversionAttempts: 'attemptBoth' });
+    if (!code) break;
+    found.push(code);
+    const loc = code.location;
+    const xs = [loc.topLeftCorner.x, loc.topRightCorner.x, loc.bottomLeftCorner.x, loc.bottomRightCorner.x];
+    const ys = [loc.topLeftCorner.y, loc.topRightCorner.y, loc.bottomLeftCorner.y, loc.bottomRightCorner.y];
+    const pad = 8;
+    const x0 = Math.max(0, Math.floor(Math.min(...xs)) - pad);
+    const x1 = Math.min(width, Math.ceil(Math.max(...xs)) + pad);
+    const y0 = Math.max(0, Math.floor(Math.min(...ys)) - pad);
+    const y1 = Math.min(height, Math.ceil(Math.max(...ys)) + pad);
+    for (let y = y0; y < y1; y++) {
+      let i = (y * width + x0) * 4;
+      for (let x = x0; x < x1; x++) {
+        data[i] = 255; data[i+1] = 255; data[i+2] = 255; data[i+3] = 255;
+        i += 4;
+      }
+    }
+  }
+  return found;
+}
+
+/* Update dwell arc + overlay state class. Total path length ≈ 200 SVG units. */
+function _setDwellVisual(progress, mode) {
+  const overlay = el('targetOverlay');
+  const arc = el('dwellProgress');
+  if (!overlay || !arc) return;
+  const total = 200;
+  arc.setAttribute('stroke-dashoffset', String(total * (1 - progress)));
+  overlay.classList.remove('locking', 'locked');
+  if (mode === 'locking') overlay.classList.add('locking');
+  else if (mode === 'locked') overlay.classList.add('locked');
+}
+
+/* Flash effect on lock — brief green pulse over the camera frame */
+function _flashScanFrame() {
+  const f = el('scanFlash'); if (!f) return;
+  f.classList.remove('flash');
+  // Force reflow so the animation restarts
+  void f.offsetWidth;
+  f.classList.add('flash');
+}
+
+async function openReprintScan(tabName) {
+  _scan.tabName = tabName;
+  const card = el('scanCard'); if (!card) return;
+  const manual = el('manualCard'); if (manual) manual.style.display = 'none';
+  card.style.display = '';
+  // Scroll the card into view (it's at the top of the app, above the tabs)
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const status = el('scanStatus');
+  status.className = 'scan-status';
+  status.textContent = 'Requesting camera…';
+  _setDwellVisual(0, 'idle');
+  _scan.dwellId = null; _scan.dwellStart = 0; _scan.dwellLastSeen = 0; _scan.cooldownUntil = 0;
+
+  if (typeof jsQR === 'undefined') {
+    status.className = 'scan-status error';
+    status.textContent = '⚠ QR library not loaded. Use "Type ID manually".';
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    status.className = 'scan-status error';
+    status.textContent = '⚠ Camera not supported in this browser';
+    return;
+  }
+
+  try {
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+        focusMode: 'continuous',
+        advanced: [{ focusMode: 'continuous' }, { focusMode: 'auto' }],
+      },
+      audio: false,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    _scan.stream = stream;
+    const video = el('scanVideo');
+    video.srcObject = stream;
+    await video.play();
+    // Try to enable continuous autofocus
+    const track = stream.getVideoTracks()[0];
+    if (track && track.applyConstraints) {
+      try {
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.focusMode && caps.focusMode.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+      } catch (e) {}
+    }
+    // Tap-to-focus
+    video.onclick = async () => {
+      if (!track || !track.applyConstraints) return;
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+        setTimeout(() => track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(()=>{}), 400);
+      } catch (e) {}
+    };
+    status.textContent = 'Point the camera at the QR (tap to focus)';
+    _scan.active = true;
+    requestAnimationFrame(_scanFrame);
+  } catch (e) {
+    status.className = 'scan-status error';
+    status.textContent = '⚠ Camera blocked or unavailable';
+    console.warn('camera error:', e);
+  }
+}
+
+function closeReprintScan() {
+  _scan.active = false;
+  if (_scan.rafId) { cancelAnimationFrame(_scan.rafId); _scan.rafId = null; }
+  if (_scan.stream) {
+    _scan.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+    _scan.stream = null;
+  }
+  const video = el('scanVideo');
+  if (video) { try { video.pause(); video.srcObject = null; video.onclick = null; } catch (e) {} }
+  _setDwellVisual(0, 'idle');
+  const card = el('scanCard'); if (card) card.style.display = 'none';
+  const manual = el('manualCard'); if (manual) manual.style.display = 'none';
+  const status = el('scanStatus'); if (status) { status.className = 'scan-status'; status.textContent = ''; }
+}
+
+/* Main scan loop — single QR in target box with dwell time triggers auto-lock */
+function _scanFrame() {
+  if (!_scan.active) return;
+  const video = el('scanVideo');
+  const canvas = el('scanCanvas');
+  const status = el('scanStatus');
+  if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+    _scan.rafId = requestAnimationFrame(_scanFrame);
+    return;
+  }
+
+  // Downsample for speed (matches inventory's SCAN_DOWNSCALE_MAX_DIM)
+  const longEdge = Math.max(video.videoWidth, video.videoHeight);
+  const scale = longEdge > SCAN_DOWNSCALE_MAX_DIM ? SCAN_DOWNSCALE_MAX_DIM / longEdge : 1;
+  canvas.width  = Math.round(video.videoWidth  * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  let imageData;
+  try { imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); }
+  catch (e) { status.textContent = '⚠ ' + e.message; return; }
+
+  const codes = _detectAllQrs(imageData, SCAN_MAX_DETECT);
+  const inBox = [];
+  const seen = new Set();
+  for (const code of codes) {
+    if (!_qrInTargetBox(code, canvas.width, canvas.height)) continue;
+    const id = normalizeQrPayload(code.data);
+    if (id && !seen.has(id)) { seen.add(id); inBox.push({ id, code }); }
+  }
+
+  const now = Date.now();
+  const inCooldown = _scan.cooldownUntil > now;
+
+  if (inCooldown) {
+    status.className = 'scan-status found';
+    status.textContent = '✓ Locked';
+  } else if (inBox.length > 1) {
+    _scan.dwellId = null; _scan.dwellStart = 0; _scan.dwellLastSeen = 0;
+    _setDwellVisual(0, 'idle');
+    status.className = 'scan-status';
+    status.textContent = `${inBox.length} QRs in the box — isolate one`;
+  } else if (inBox.length === 1) {
+    const target = inBox[0];
+    if (_scan.dwellId !== target.id) {
+      _scan.dwellId = target.id;
+      _scan.dwellStart = now;
+    }
+    _scan.dwellLastSeen = now;
+    const elapsed = now - _scan.dwellStart;
+    const progress = Math.min(1, elapsed / SCAN_DWELL_MS);
+    if (progress >= 1) {
+      // LOCK
+      _scan.cooldownUntil = now + 1200;
+      _scan.dwellId = null; _scan.dwellStart = 0; _scan.dwellLastSeen = 0;
+      _setDwellVisual(1, 'locked');
+      _flashScanFrame();
+      status.className = 'scan-status found';
+      status.textContent = `✓ ${target.id}`;
+      const tab = _scan.tabName;
+      // Close card after a brief moment so the user sees the confirmation
+      setTimeout(() => {
+        closeReprintScan();
+        handleScannedId(tab, target.id);
+      }, 350);
+      return; // stop the loop; closeReprintScan will tear down the rest
+    } else {
+      _setDwellVisual(progress, 'locking');
+      status.className = 'scan-status';
+      status.textContent = 'Hold steady…';
+    }
+  } else {
+    // No QR in box this frame. Allow brief grace period for camera blur/jitter.
+    if (_scan.dwellId && (now - _scan.dwellLastSeen) < SCAN_DWELL_GRACE_MS) {
+      const elapsed = _scan.dwellLastSeen - _scan.dwellStart;
+      const progress = Math.min(1, elapsed / SCAN_DWELL_MS);
+      _setDwellVisual(progress, 'locking');
+    } else {
+      _scan.dwellId = null; _scan.dwellStart = 0; _scan.dwellLastSeen = 0;
+      _setDwellVisual(0, 'idle');
+      status.className = 'scan-status';
+      status.textContent = 'Point the camera at the QR (tap to focus)';
+    }
+  }
+
+  _scan.rafId = requestAnimationFrame(_scanFrame);
+}
+
+/* Manual-ID fallback — replaces the scan card with a text-input card */
+function openManualEntry() {
+  // Stop the camera but DON'T fully close the flow — keep _scan.tabName so submit knows where
+  _scan.active = false;
+  if (_scan.rafId) { cancelAnimationFrame(_scan.rafId); _scan.rafId = null; }
+  if (_scan.stream) {
+    _scan.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+    _scan.stream = null;
+  }
+  const video = el('scanVideo');
+  if (video) { try { video.pause(); video.srcObject = null; } catch (e) {} }
+  const card = el('scanCard'); if (card) card.style.display = 'none';
+  const manual = el('manualCard'); if (manual) manual.style.display = '';
+  const inp = el('manualIdInput');
+  if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+}
+
+function backToScanFromManual() {
+  const tab = _scan.tabName;
+  // Close manual, re-open scanner
+  const manual = el('manualCard'); if (manual) manual.style.display = 'none';
+  openReprintScan(tab);
+}
+
+function submitManualId() {
+  const inp = el('manualIdInput'); if (!inp) return;
+  const id = (inp.value || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{3,8}$/.test(id)) {
+    alert('Enter a valid label ID (3–8 letters/digits).');
+    inp.focus();
+    return;
+  }
+  const tab = _scan.tabName;
+  closeReprintScan();
+  handleScannedId(tab, id);
+}
+
+/* Once we have an ID (from camera or manual), decide what to do with it. */
+async function handleScannedId(tabName, id) {
+  const ts = getTabState(tabName); if (!ts) return;
+
+  // Case 1: this ID is already a row in this tab → move it to top, pulse.
+  const existingIdx = ts.rows.findIndex(r => r.id === id);
+  if (existingIdx >= 0) {
+    const existing = ts.rows[existingIdx];
+    ts.rows.splice(existingIdx, 1);
+    ts.rows.unshift(existing);
+    await persistTabRows(tabName);
+    renderTab(tabName);
+    setTimeout(() => {
+      const tr = document.querySelector(`#${tabName}Body tr[data-uid="${existing.uid}"]`);
+      if (tr) {
+        tr.classList.add('row-just-scanned');
+        tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        setTimeout(() => tr.classList.remove('row-just-scanned'), 1800);
+      }
+    }, 0);
+    return;
+  }
+
+  // Case 2: fetch existing inventory record for this ID
+  let record = null;
+  try {
+    const r = await fetch('/api/items/' + encodeURIComponent(id), { cache: 'no-store' });
+    if (r.ok) record = await r.json();
+  } catch (e) { console.warn('inventory fetch failed:', e); }
+
+  let lines = [], w_mm = null, h_mm = null;
+  if (record) {
+    const rec = record.record || record;
+    if (rec) {
+      if (Array.isArray(rec.lines)) lines = rec.lines;
+      if (typeof rec.w_mm === 'number') w_mm = rec.w_mm;
+      if (typeof rec.h_mm === 'number') h_mm = rec.h_mm;
+    }
+  }
+  if (lines.length === 0 && state.registry[id]) {
+    const local = state.registry[id];
+    if (Array.isArray(local.lines)) lines = local.lines;
+    if (typeof local.w_mm === 'number' && w_mm === null) w_mm = local.w_mm;
+    if (typeof local.h_mm === 'number' && h_mm === null) h_mm = local.h_mm;
+  }
+
+  await addRow(tabName, {
+    preserveId: id,
+    isReprint: true,
+    line1: lines[0] || '',
+    line2: lines[1] || '',
+    line3: lines[2] || '',
+    qr: true,
+    copies: 1,
+    w: w_mm,
+    h: h_mm,
+    formatName: 'custom',
+  });
+
+  setTimeout(() => {
+    const tr = document.querySelector(`#${tabName}Body tr:first-child`);
+    if (tr) {
+      tr.classList.add('row-just-scanned');
+      setTimeout(() => tr.classList.remove('row-just-scanned'), 1800);
+    }
+  }, 50);
+}
+
+/* After a row marked isReprint is successfully printed, push its updated text lines
+   to /api/items/<id>. Backend merges, leaving location/quantity/etc untouched. */
+async function pushReprintToInventory(row) {
+  if (!row || !row.id) return;
+  const payload = {
+    lines: [row.line1, row.line2, row.line3].filter(s => s && s.trim()),
+    w_mm: row.w,
+    h_mm: row.h,
+    format_name: row.formatName || 'custom',
+  };
+  try {
+    const r = await fetch('/api/items/' + encodeURIComponent(row.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) console.warn('inventory PUT failed for', row.id, r.status);
+  } catch (e) { console.warn('inventory PUT error for', row.id, e); }
+}
+
+
+async function printSingleRow(tabName, uidStr) {
+  const ts = getTabState(tabName); if (!ts) return;
+  const row = ts.rows.find(r => r.uid === uidStr); if (!row) return;
+  if (tabName === 'maker') {
+    return printRowToTape(row, document.querySelector(`#makerBody tr[data-uid="${uidStr}"] .print-row-btn`));
+  } else if (tabName === 'printer') {
+    return printSheetForRows([row], 'one row');
+  }
+}
+
+async function printRowToTape(row, btnEl) {
+  let status;
+  try { const r = await fetch('/api/printer/status'); status = await r.json(); }
+  catch (e) { alert('Cannot reach printer endpoint. Is the backend running?'); return; }
+  if (!status.connected) {
+    const detail = status.error || status.raw || 'unknown';
+    alert(`Printer not connected.\n\n${detail}\n\nMake sure:\n• PT-P700 is plugged into the Pi via USB\n• Power is on\n• The PLite green LED is OFF\n• Tape cassette is installed`);
+    return;
+  }
+
+  // Slice 3: row dimensions are immutable; the row's stored h IS the tape width
+  // we must print at. If the loaded cartridge doesn't match, refuse outright.
+  const rowTapeWidth = row.h;
+  if (status.tape_width_mm && Math.abs(status.tape_width_mm - rowTapeWidth) > 0.01) {
+    alert(`Can't print this label.\n\n` +
+          `• Label requires ${rowTapeWidth}mm tape\n` +
+          `• Printer has ${status.tape_width_mm}mm cartridge loaded\n\n` +
+          `Load matching tape and try again.`);
+    return;
+  }
+  const maxPrintPx = resolveMaxPrintPx(rowTapeWidth, status);
+  const copies = Math.max(1, parseInt(row.copies || 1));
+  const confirmMsg = `Print to ${status.model || 'tape printer'}?\n` +
+                     `• Tape: ${rowTapeWidth}mm\n` +
+                     `• Copies: ${copies}\n` +
+                     `• Content: ${row.line1 || row.id}`;
+  if (!confirm(confirmMsg)) return;
+
+  let pngDataUrl;
+  try { pngDataUrl = await renderRowToTapePng(row, rowTapeWidth, maxPrintPx); }
+  catch (e) { alert('Failed to render label: ' + e.message); return; }
+
+  const original = btnEl ? btnEl.textContent : null;
+  if (btnEl) { btnEl.textContent = '⌛'; btnEl.disabled = true; }
+  try {
+    const resp = await fetch('/api/print', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ png_base64: pngDataUrl.split(',')[1], copies }),
+    });
+    const result = await resp.json();
+    if (!result.ok) alert(`Print failed:\n${result.error || 'unknown'}\n\n${JSON.stringify(result.detail || result.results || {}, null, 2)}`);
+    else {
+      // Slice 5: if this was a reprint row, push updated text lines back to inventory.
+      if (row.isReprint) { pushReprintToInventory(row); row.isReprint = false; persistTabRows('maker'); }
+      if (btnEl) { btnEl.textContent = '✓'; setTimeout(() => { btnEl.textContent = original; btnEl.disabled = false; }, 1500); }
+    }
+  } catch (e) { alert('Network error: ' + e.message); }
+  finally { if (btnEl && btnEl.textContent === '⌛') { btnEl.textContent = original; btnEl.disabled = false; } }
+}
+
+async function printBatchToTape() {
+  const allSelected = state.maker.rows.filter(r => r.selected);
+  if (allSelected.length === 0) { alert('No rows selected.'); return; }
+
+  let status;
+  try { const r = await fetch('/api/printer/status'); status = await r.json(); }
+  catch (e) { alert('Cannot reach printer endpoint.'); return; }
+  if (!status.connected) { alert(`Printer not connected.\n\n${status.hint || status.error || 'unknown'}`); return; }
+  if (!status.tape_width_mm) { alert('Printer is connected but tape width is unknown.'); return; }
+
+  const cartridgeH = status.tape_width_mm;
+  // Slice 4: filter selected to only rows matching the loaded cartridge.
+  // Mismatch rows are silently ignored (user is informed in the confirm dialog).
+  const printable = allSelected.filter(r => Math.abs(r.h - cartridgeH) < 0.01);
+  if (printable.length === 0) {
+    alert(`None of the ${allSelected.length} selected rows match the loaded ${cartridgeH}mm cartridge.\n\n` +
+          `Either load matching tape or select rows of ${cartridgeH}mm height.`);
+    return;
+  }
+  const skipped = allSelected.length - printable.length;
+
+  const expanded = [];
+  for (const row of printable) {
+    const copies = Math.max(1, parseInt(row.copies || 1));
+    for (let i = 0; i < copies; i++) expanded.push(row);
+  }
+
+  const tapeWidth = cartridgeH;
+  const maxPrintPx = resolveMaxPrintPx(tapeWidth, status);
+
+  const totalContentMm = expanded.reduce((s, r) => s + effectiveDimsForRow(r).w, 0);
+  const leaderMm = 25;
+  const totalTapeMm = totalContentMm + leaderMm;
+
+  let confirmMsg =
+    `Print ${expanded.length} labels as ONE batch on ${status.model || 'tape printer'}?\n\n` +
+    `• Tape: ${tapeWidth}mm\n` +
+    `• Total tape used: ~${totalTapeMm.toFixed(0)}mm (${(totalTapeMm/25.4).toFixed(1)}")`;
+  if (skipped > 0) {
+    confirmMsg += `\n\n${skipped} selected row${skipped===1?' was':'s were'} skipped (height didn't match cartridge).`;
+  }
+  if (!confirm(confirmMsg)) return;
+
+  const btn = el('makerBatchBtn');
+  const orig = btn ? btn.textContent : null;
+  if (btn) { btn.textContent = '⌛ Rendering…'; btn.disabled = true; }
+
+  let pngList = [];
+  try {
+    for (const row of expanded) {
+      const url = await renderRowToTapePng(row, tapeWidth, maxPrintPx);
+      pngList.push(url.split(',')[1]);
+    }
+  } catch (e) {
+    alert('Failed to render batch: ' + e.message);
+    if (btn) { btn.textContent = orig; btn.disabled = false; }
+    return;
+  }
+
+  if (btn) btn.textContent = '⌛ Printing…';
+  try {
+    const resp = await fetch('/api/print', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pngs_base64: pngList, copies: 1 }),
+    });
+    const result = await resp.json();
+    if (!result.ok) alert(`Batch print failed:\n${result.error || 'unknown'}\n\n${JSON.stringify(result.detail || result.results || {}, null, 2)}`);
+    else {
+      // Slice 5: push every reprint row to inventory (unique by ID, since `printable`
+      // may contain copies of the same row).
+      const reprintIds = new Set();
+      for (const r of printable) {
+        if (r.isReprint && !reprintIds.has(r.id)) {
+          reprintIds.add(r.id);
+          pushReprintToInventory(r);
+          r.isReprint = false;
+        }
+      }
+      if (reprintIds.size > 0) persistTabRows('maker');
+      if (btn) { btn.textContent = '✓ Printed'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000); }
+    }
+  } catch (e) { alert('Network error: ' + e.message); }
+  if (btn && btn.textContent.indexOf('⌛') === 0) { btn.textContent = orig; btn.disabled = false; }
+}
+
+/* ---- SHEET PRINTING ---- */
+function printSheetForRows(rows, label) {
+  // Build items list from given rows (each with its copies)
+  const items = [];
+  for (const row of rows) {
+    const dims = effectiveDimsForRow(row);
+    const n = Math.max(1, row.copies || 1);
+    for (let i = 0; i < n; i++) items.push({ row, w: dims.w, h: dims.h });
+  }
+  if (items.length === 0) { alert('Nothing to print.'); return; }
+  doPrintSheet(items);
+}
+
+function printAllSheet() { printSheetForRows(state.printer.rows, 'all rows'); }
+function printSelectedSheet() {
+  const sel = state.printer.rows.filter(r => r.selected);
+  if (sel.length === 0) { alert('No rows selected.'); return; }
+  printSheetForRows(sel, 'selected rows');
+}
+
+function doPrintSheet(items) {
+  const isLandscape = state.printer.orientation === 'landscape';
+  const pageW = isLandscape ? 279.4 : 215.9;
+  const pageH = isLandscape ? 215.9 : 279.4;
+  const margin = parseFloat(state.printer.pageMargin) || 0;
+  const gapH = parseFloat(state.printer.gapH) || 0;
+  const gapV = parseFloat(state.printer.gapV) || 0;
+  const pages = paginate(pageW, pageH, margin, gapH, gapV, items);
+
+  // CSS @page size for browser print
+  document.documentElement.style.setProperty('--page-size', isLandscape ? 'letter landscape' : 'letter');
+
+  const area = el('print-area'); area.innerHTML = '';
+  const cards = [];
+  pages.forEach(page => {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet sheet-letter';
+    sheet.style.transform = 'none';
+    sheet.style.width = (pageW * MM_TO_PX) + 'px';
+    sheet.style.height = (pageH * MM_TO_PX) + 'px';
+    const inner = document.createElement('div');
+    inner.style.position = 'absolute';
+    inner.style.left = (margin * MM_TO_PX) + 'px';
+    inner.style.top  = (margin * MM_TO_PX) + 'px';
+    inner.style.width = ((pageW - 2*margin) * MM_TO_PX) + 'px';
+    inner.style.height = ((pageH - 2*margin) * MM_TO_PX) + 'px';
+    sheet.appendChild(inner);
+
+    page.forEach(it => {
+      const card = buildLabelCard(it.row);
+      if (!state.printer.cutMarks) card.style.border = 'none';
+      card.style.position = 'absolute';
+      card.style.left = (it.x * MM_TO_PX) + 'px';
+      card.style.top  = (it.y * MM_TO_PX) + 'px';
+      inner.appendChild(card);
+      cards.push(card);
+    });
+    area.appendChild(sheet);
+  });
+
+  requestAnimationFrame(() => {
+    cards.forEach(c => c._fit && c._fit());
+    // Slice 5: push reprint rows back to inventory before opening the print dialog.
+    // (We can't distinguish "actually printed" from "cancelled" reliably from JS,
+    // so we update on dialog-open. Inventory is forgiving — re-editing and re-printing
+    // will just update again.)
+    const seen = new Set();
+    items.forEach(it => {
+      const r = it.row;
+      if (r && r.isReprint && !seen.has(r.id)) {
+        seen.add(r.id);
+        pushReprintToInventory(r);
+        r.isReprint = false;
+      }
+    });
+    if (seen.size > 0) persistTabRows('printer');
+    setTimeout(() => { window.print(); }, 80);
+  });
+}
+
+/* ---- STICKY PRINT BAR (per-tab) ---- */
+function updateStickyPrint() {
+  const bar = el('stickyPrint'); if (!bar) return;
+  const tab = state.activeTab;
+  if (tab === 'registry') {
+    bar.classList.remove('visible'); document.body.classList.remove('has-sticky-print'); return;
+  }
+  const ts = getTabState(tab); if (!ts) return;
+  const total = ts.rows.length;
+  if (total === 0) { bar.classList.remove('visible'); document.body.classList.remove('has-sticky-print'); return; }
+
+  const selectedRows = ts.rows.filter(r => r.selected);
+  const selCount = selectedRows.length;
+
+  let summaryHtml, btnHtml;
+  if (tab === 'maker') {
+    // Slice 4: Maker print is gated by the connected printer's cartridge height.
+    // Only rows matching the cartridge are countable; printer must be connected.
+    const ready = isPrinterReady();
+    const cartridgeH = ready ? _lastPrinterStatus.tape_width_mm : null;
+    const printable = ready ? selectedRows.filter(r => Math.abs(r.h - cartridgeH) < 0.01) : [];
+    const printLabels = printable.reduce((s,r) => s + Math.max(1, r.copies||1), 0);
+    const skipped = selCount - printable.length;
+
+    let canPrint = ready && printable.length > 0;
+    if (selCount === 0) {
+      summaryHtml = `<span style="color:var(--muted);">Select rows in the table</span>`;
+    } else if (!ready) {
+      summaryHtml = `<span style="color:var(--accent);">Connect a printer to print</span>`;
+    } else if (printable.length === 0) {
+      summaryHtml = `<span style="color:var(--accent);">0 of ${selCount} match ${cartridgeH}mm cartridge</span>`;
+    } else {
+      summaryHtml = `<b>${printLabels}</b> label${printLabels===1?'':'s'} · ${printable.length}/${selCount} match ${cartridgeH}mm` +
+                    (skipped > 0 ? ` · ${skipped} skipped` : '');
+    }
+    btnHtml = `<button class="primary-btn" id="makerBatchBtn" ${canPrint ? '' : 'disabled'}>⎙ Print Selected to Tape</button>`;
+  } else {
+    const labelCount = selectedRows.reduce((s,r) => s + Math.max(1, r.copies||1), 0);
+    summaryHtml = selCount === 0
+      ? `<span style="color:var(--muted);">Select rows in the table</span>`
+      : `<b>${labelCount}</b> label${labelCount===1?'':'s'} · ${selCount} row${selCount===1?'':'s'} selected`;
+    btnHtml = `<button class="primary-btn printer" id="printerSelBtn" ${selCount===0?'disabled':''}>📄 Print Sheet</button>`;
+  }
+  bar.innerHTML = `<div class="summary">${summaryHtml}</div>${btnHtml}`;
+  bar.classList.add('visible');
+  document.body.classList.add('has-sticky-print');
+
+  if (tab === 'maker') {
+    const sel = el('makerBatchBtn');
+    if (sel && !sel.disabled) sel.addEventListener('click', () => printBatchToTape());
+  } else {
+    const sel = el('printerSelBtn');
+    if (sel && !sel.disabled) sel.addEventListener('click', () => printSelectedSheet());
+  }
+}
+
+/* ---- WIRING ---- */
+function toggleUrlField() {
+  const show = state.qrMode === 'url' ? '' : 'none';
+  const a = el('urlPrefixField'); if (a) a.style.display = show;
+}
+
+function renderTab(tabName) {
+  renderTable(tabName);
+  renderPresets(tabName);
+  if (tabName === state.activeTab) {
+    renderPreview();
+    updateStickyPrint();
+  }
+  updateMeta();
+}
+function renderAll() {
+  renderTab('maker'); renderTab('printer');
+  updateBackendIndicator();
+  // Make sure active tab shows
+  switchTab(state.activeTab);
+  updateMeta();
+}
+
+function setupListeners() {
+  // Nav
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.addEventListener('click', () => switchTab(b.dataset.tab));
+  });
+
+  // Maker config
+  el('makerW').addEventListener('input', () => { const v = parseFloat(el('makerW').value); if (!isNaN(v)) state.maker.formatW = v; persistConfig(); });
+  el('makerH').addEventListener('input', () => { const v = parseFloat(el('makerH').value); if (!isNaN(v)) state.maker.formatH = v; persistConfig(); });
+  el('makerColor').addEventListener('change', () => { state.maker.formatColor = el('makerColor').value; persistConfig(); });
+  el('makerSavePresetBtn').addEventListener('click', () => savePreset('maker'));
+
+  // Printer config
+  el('printerW').addEventListener('input', () => { const v = parseFloat(el('printerW').value); if (!isNaN(v)) state.printer.formatW = v; persistConfig(); schedulePreview(); });
+  el('printerH').addEventListener('input', () => { const v = parseFloat(el('printerH').value); if (!isNaN(v)) state.printer.formatH = v; persistConfig(); schedulePreview(); });
+  el('printerSavePresetBtn').addEventListener('click', () => savePreset('printer'));
+  el('sheetOrientation').addEventListener('change', () => { state.printer.orientation = el('sheetOrientation').value; persistConfig(); schedulePreview(); });
+  el('pageMargin').addEventListener('input', () => { state.printer.pageMargin = parseFloat(el('pageMargin').value) || 0; persistConfig(); schedulePreview(); });
+  el('gapH').addEventListener('input', () => { state.printer.gapH = parseFloat(el('gapH').value) || 0; persistConfig(); schedulePreview(); });
+  el('gapV').addEventListener('input', () => { state.printer.gapV = parseFloat(el('gapV').value) || 0; persistConfig(); schedulePreview(); });
+  el('cutMarks').addEventListener('change', () => { state.printer.cutMarks = el('cutMarks').checked; persistConfig(); });
+
+  // Slice 4: manual tape-width override (in printer status strip).
+  // Used for preview only when no printer is connected. When a printer IS connected,
+  // the connected cartridge wins and this dropdown's value is ignored.
+  const tov = el('tapeOverrideSel');
+  if (tov) tov.addEventListener('change', () => {
+    state.tapeOverrideMm = tov.value || '';
+    persistConfig();
+    renderTable('maker');   // printability indicators may change
+    schedulePreview();
+  });
+
+  // QR (single instance lives in Options tab)
+  const qrModeEl = el('qrMode');
+  if (qrModeEl) qrModeEl.addEventListener('change', () => {
+    state.qrMode = qrModeEl.value;
+    toggleUrlField();
+    state.maker.rows.forEach(logRow);
+    state.printer.rows.forEach(logRow);
+    persistConfig();
+    schedulePreview();
+  });
+  const urlPrefixEl = el('urlPrefix');
+  if (urlPrefixEl) urlPrefixEl.addEventListener('input', () => {
+    state.urlPrefix = urlPrefixEl.value;
+    state.maker.rows.forEach(logRow);
+    state.printer.rows.forEach(logRow);
+    persistConfig();
+    schedulePreview();
+  });
+
+  // Toolbar buttons (work for both tabs via data-table)
+  document.querySelectorAll('.add-row-btn').forEach(b => b.addEventListener('click', () => addRow(b.dataset.table)));
+  document.querySelectorAll('.add-blank-rows-btn').forEach(b => b.addEventListener('click', async () => {
+    for (let i = 0; i < 5; i++) await addRow(b.dataset.table);
+  }));
+  // Slice 5: Reprint Label opens the camera scan modal
+  document.querySelectorAll('.reprint-btn').forEach(b => b.addEventListener('click', () => {
+    openReprintScan(b.dataset.table);
+  }));
+  document.querySelectorAll('.dup-selected-btn').forEach(b => b.addEventListener('click', async () => {
+    const ts = getTabState(b.dataset.table); if (!ts) return;
+    const sel = ts.rows.filter(r => r.selected).map(r => r.uid);
+    for (const u of sel) await duplicateRow(b.dataset.table, u);
+  }));
+  document.querySelectorAll('.del-selected-btn').forEach(b => b.addEventListener('click', async () => {
+    const ts = getTabState(b.dataset.table); if (!ts) return;
+    if (!confirm('Delete selected rows? IDs stay reserved.')) return;
+    ts.rows = ts.rows.filter(r => !r.selected);
+    await persistTabRows(b.dataset.table);
+    renderTab(b.dataset.table);
+  }));
+  document.querySelectorAll('.select-all-chk').forEach(c => c.addEventListener('change', e => {
+    const tab = c.dataset.table;
+    const ts = getTabState(tab); if (!ts) return;
+    // Slice 4: select-all selects EVERY row (printable or not), since the user might
+    // want to duplicate/delete unprintable rows in bulk. Print path filters at print time.
+    ts.rows.forEach(r => { r.selected = e.target.checked; });
+    renderTable(tab); updateStickyPrint(); schedulePreview();
+  }));
+  document.querySelectorAll('.reissue-btn').forEach(b => b.addEventListener('click', async () => {
+    const ts = getTabState(b.dataset.table); if (!ts) return;
+    if (!confirm('Reissue new IDs for all rows in this tab? Old IDs stay reserved.')) return;
+    for (const row of ts.rows) { row.id = await issueId(); row.created = new Date().toISOString(); logRow(row); }
+    await persistTabRows(b.dataset.table);
+    renderTab(b.dataset.table);
+  }));
+  document.querySelectorAll('.clear-table-btn').forEach(b => b.addEventListener('click', async () => {
+    const ts = getTabState(b.dataset.table); if (!ts) return;
+    if (!confirm('Clear all rows in this tab? IDs stay reserved.')) return;
+    ts.rows = [];
+    await persistTabRows(b.dataset.table);
+    renderTab(b.dataset.table);
+  }));
+
+  // Registry/Data
+  el('exportJsonBtn').addEventListener('click', exportJson);
+  el('exportCsvBtn').addEventListener('click', exportCsv);
+  el('importBtn').addEventListener('click', () => el('importFile').click());
+  el('importFile').addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) importJson(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  // Slice 6: Backup & Restore
+  el('backupDownloadBtn').addEventListener('click', downloadBackup);
+  el('backupToDriveBtn').addEventListener('click', backupToDrive);
+  el('restoreBtn').addEventListener('click', () => el('restoreFile').click());
+  el('restoreFile').addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) restoreFromBackup(e.target.files[0]);
+    e.target.value = '';
+  });
+  // Check drive availability now and again whenever the Options tab opens
+  refreshBackupDriveStatus();
+  el('resetBtn').addEventListener('click', async () => {
+    if (!confirm('Reset EVERYTHING — all rows, all issued IDs, all registry data, all presets. Continue?')) return;
+    if (!confirm('Really? This cannot be undone.')) return;
+    state.maker.rows = []; state.printer.rows = [];
+    state.maker.presets = []; state.printer.presets = [];
+    state.used = new Set(); state.registry = {};
+    await persistUsed(); await persistRegistry();
+    await persistMakerRows(); await persistPrinterRows();
+    await persistTapePresets(); await persistSheetPresets();
+    renderAll();
+  });
+
+  // Slice 5: inline scan card buttons (close, manual entry, manual submit, etc.)
+  if (el('scanCloseBtn'))    el('scanCloseBtn').addEventListener('click', closeReprintScan);
+  if (el('manualEntryBtn'))  el('manualEntryBtn').addEventListener('click', openManualEntry);
+  if (el('manualCloseBtn'))  el('manualCloseBtn').addEventListener('click', closeReprintScan);
+  if (el('manualBackBtn'))   el('manualBackBtn').addEventListener('click', backToScanFromManual);
+  if (el('manualSubmitBtn')) el('manualSubmitBtn').addEventListener('click', submitManualId);
+  if (el('manualIdInput'))   el('manualIdInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitManualId();
+  });
+  // ESC key closes scan card if open
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      const card = el('scanCard');
+      const manual = el('manualCard');
+      if ((card && card.style.display !== 'none') ||
+          (manual && manual.style.display !== 'none')) {
+        closeReprintScan();
+      }
+    }
+  });
+}
+
+/* ---- PRINTER STATUS DISPLAY ---- */
+let _lastPrinterStatus = null;
+
+/* Slice 4: show or hide the "PREVIEW AS" override widget in the status strip.
+   - Connected: hide entirely (cartridge wins; no manual override needed).
+   - Disconnected: show, so the user can pick a tape size for preview. */
+function updateOverrideVisibility() {
+  const wrap = el('overrideWrap'); if (!wrap) return;
+  const connected = !!(_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm);
+  wrap.style.display = connected ? 'none' : '';
+}
+
+/* Slice 4: When disconnected and an override is set, surface it in the status text. */
+function updateTapeStatusHint() {
+  const text = el('printerText'); if (!text) return;
+  const d = _lastPrinterStatus;
+  if (!d) return;
+  renderPrinterStatusText(d);
+  // No "preview Nmm" suffix — the dropdown itself shows the override value.
+}
+
+/* Slice 5b: resolve backend's color strings to a TAPE_COLORS key. Brother's
+   ptouch-print reports raw color names ("white", "yellow", "black", etc.).
+   We pair the tape color and text color to find a known combo in our palette;
+   if no exact match, fall back to white-black. */
+function resolveTapeColorKey(tapeColor, textColor) {
+  const t = (tapeColor || '').toLowerCase().trim();
+  const ti = (textColor || '').toLowerCase().trim();
+  if (!t) return 'white-black';
+  // Try exact tape-text combo
+  const k1 = `${t}-${ti}`;
+  if (TAPE_COLORS[k1]) return k1;
+  // Fall back to any combo starting with this tape color
+  const partial = Object.keys(TAPE_COLORS).find(k => k.startsWith(t + '-'));
+  if (partial) return partial;
+  return 'white-black';
+}
+
+/* Render the tape-size + color swatch as HTML for the status strip. */
+function renderTapeChipHtml(d) {
+  const sizeStr = d.tape_width_mm ? `${d.tape_width_mm}mm`
+                : d.tape_width_px ? `${d.tape_width_px}px`
+                : 'Ready';
+  const key = resolveTapeColorKey(d.tape_color, d.text_color);
+  const c = TAPE_COLORS[key] || TAPE_COLORS['white-black'];
+  // Plain escape — sizeStr is built locally so no untrusted content, but be safe.
+  const safe = String(sizeStr).replace(/[&<>"]/g, ch =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  return `<span class="tape-chip" style="background:${c.tape};color:${c.ink};">${safe}</span>`;
+}
+
+function renderPrinterStatusText(d) {
+  const dot = el('printerDot'); const text = el('printerText');
+  if (!dot || !text) return;
+  if (d.connected) {
+    dot.className = 'dot ok';
+    text.innerHTML = renderTapeChipHtml(d);
+  } else {
+    dot.className = 'dot err';
+    // Short fixed string — no hints, no raw error dumps, no PLite tips.
+    text.textContent = 'Not connected';
+  }
+}
+
+async function refreshPrinterStatus() {
+  const dot = el('printerDot'); const text = el('printerText');
+  const btn = document.querySelector('.printer-refresh');
+  if (!dot || !text) return;
+  if (btn) btn.disabled = true;
+  text.textContent = 'checking…'; dot.className = 'dot unknown';
+  try {
+    const r = await fetch('/api/printer/status', { cache: 'no-store' });
+    const d = await r.json();
+    const prevWidth = _lastPrinterStatus ? _lastPrinterStatus.tape_width_mm : null;
+    const prevConnected = _lastPrinterStatus ? _lastPrinterStatus.connected : null;
+    _lastPrinterStatus = d;
+    renderPrinterStatusText(d);
+    updateTapeStatusHint();
+    updateOverrideVisibility();
+    // If cartridge width or connection changed, re-render Maker (printability indicators).
+    const widthChanged = (d.tape_width_mm || null) !== prevWidth;
+    const connectionChanged = !!d.connected !== !!prevConnected;
+    if (widthChanged || connectionChanged) { renderTable('maker'); schedulePreview(); }
+  } catch (e) {
+    dot.className = 'dot err'; text.textContent = 'Offline';
+    _lastPrinterStatus = null;
+    updateOverrideVisibility();
+    renderTable('maker');
+  }
+  finally { if (btn) btn.disabled = false; }
+}
+
+/* ---- INIT ---- */
+(async function init() {
+  setupListeners();
+  toggleUrlField();
+  updateBackendIndicator();
+  await loadAll();
+  renderAll();
+  _upgradeToApiIfAvailable();
+  refreshPrinterStatus();
+  setInterval(refreshPrinterStatus, 30000);
+})();
+</script>
+</body>
+</html>

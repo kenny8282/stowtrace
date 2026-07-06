@@ -1,0 +1,29 @@
+[Unit]
+Description=StowTrace Label Forge Backend
+After=network.target
+
+[Service]
+Type=simple
+User=kenny
+Group=kenny
+WorkingDirectory=/opt/stowtrace
+Environment="ST_DATA_DIR=/var/lib/stowtrace"
+ExecStart=/opt/stowtrace/venv/bin/gunicorn \
+  --workers 2 \
+  --timeout 600 \
+  --bind 127.0.0.1:8765 \
+  --access-logfile - \
+  --error-logfile - \
+  stowtrace_backend:app
+Restart=always
+RestartSec=3
+
+# Security hardening
+# (NoNewPrivileges=true would block sudo nmcli for WiFi management,
+#  so we leave it off and rely on the narrow sudoers rule to limit blast radius.)
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/stowtrace
+
+[Install]
+WantedBy=multi-user.target
