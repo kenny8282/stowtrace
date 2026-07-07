@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.2"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.3"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -532,6 +532,14 @@ def _auth_init():
     except Exception as e:
         app.logger.warning(f"location restructure migration skipped: {e}")
 
+    # Category tree rebuild (v2.9.3): the seed process left items with detailed
+    # category STRINGS that didn't match the coarse category_id tree. This
+    # rebuilds a clean, flat tree from the strings and re-maps every item.
+    try:
+        _migrate_category_rebuild(d)
+    except Exception as e:
+        app.logger.warning(f"category rebuild migration skipped: {e}")
+
 
 def _migrate_location_restructure(d):
     """Idempotent Stage 1 migration. Safe to run repeatedly.
@@ -594,6 +602,151 @@ def _migrate_location_restructure(d):
     _write_file("st:config", json.dumps(cfg))
     if changed:
         app.logger.info("location restructure migration applied")
+
+
+# Root-level merges: pure corruption/casing variants of the SAME category.
+_CAT_ROOT_MERGE = {
+    "Promoto": "Promoto-MX",
+    "Motors & ESC's": "Motors & ESCs",
+    "RC Bodies": "RC Bodies, Paints & Accessories",
+    "RC Bodies & Accessories": "RC Bodies, Paints & Accessories",
+    "Bodies & Paint": "RC Bodies, Paints & Accessories",
+    "Adhesives": "Adhesive & Threadlocker",
+    "Tires, Wheels & Accessories": "Wheels & Tires",
+    "Grease & Oil": "RC Shock & Differential Oils, Greases & Fluids",
+    "Nitro Fuel": "Nitro",
+    "Body Clips": "Hardware",
+    "Pins": "Hardware",
+}
+
+
+def _cat_clean_parts(s):
+    """Turn a raw scraped category string into cleaned [root, sub?] parts.
+    Repairs the '&'/plural corruption and drops scale-fragment split artifacts."""
+    import re as _re
+    if not s:
+        return None
+    s = s.replace("RTRs& - Kits", "RTRs & Kits").replace("RTRsKits", "RTRs & Kits")
+    s = _re.sub(r"^RTRs - Kits", "RTRs & Kits", s)
+    s = s.replace("OilsGreasesFluids", "Oils, Greases & Fluids")
+    s = s.replace("Oils& - Greases& - Fluids", "Oils, Greases & Fluids")
+    s = s.replace("Oils - Greases - Fluids", "Oils, Greases & Fluids")
+    parts = [p.strip() for p in s.split(" - ")]
+    cleaned = []
+    for p in parts:
+        pu = p.upper()
+        if p.isdigit():
+            continue
+        if _re.match(r"^\d+(ST|ND|RD|TH)?$", pu):
+            continue
+        if "SCALE" in pu and len(p) < 18 and any(c.isdigit() for c in p):
+            continue
+        cleaned.append(p)
+    if cleaned and cleaned[0].isupper() and len(cleaned[0]) > 2:
+        cleaned[0] = cleaned[0].title()
+    return cleaned or None
+
+
+def _migrate_category_rebuild(d):
+    """Rebuild a clean, flat category tree from item category strings and re-map
+    every item's category_id. Idempotent via a config marker. Only runs when
+    there is data to migrate."""
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    if isinstance(cfg, dict) and cfg.get("_catrebuild_v1"):
+        return
+
+    item_rows = d.execute("SELECT id, data FROM items WHERE type IN ('item','container')").fetchall()
+    if not item_rows:
+        return  # nothing to migrate yet
+
+    import secrets as _secrets
+    # Build the tree: root -> {sub_name -> None}. Track a name->id map.
+    root_ids = {}      # root name -> cat id
+    sub_ids = {}       # (root name, sub name) -> cat id
+    tree = {}          # cat id -> node
+
+    def _new_cat_id():
+        return "cat_" + _secrets.token_hex(4)
+
+    def _ensure_root(name):
+        if name not in root_ids:
+            cid = _new_cat_id()
+            root_ids[name] = cid
+            tree[cid] = {"id": cid, "name": name, "parent_id": None, "attributes": []}
+        return root_ids[name]
+
+    def _ensure_sub(root_name, sub_name):
+        key = (root_name, sub_name)
+        if key not in sub_ids:
+            parent = _ensure_root(root_name)
+            cid = _new_cat_id()
+            sub_ids[key] = cid
+            tree[cid] = {"id": cid, "name": sub_name, "parent_id": parent, "attributes": []}
+        return sub_ids[key]
+
+    # Assign each item to a (root, sub) and collect the tree.
+    assignments = {}   # item id -> target cat id
+    for row in item_rows:
+        try:
+            it = json.loads(row["data"])
+        except Exception:
+            continue
+        cp = _cat_clean_parts(it.get("category"))
+        if not cp:
+            root, sub = "Unclassified", None
+        else:
+            root = cp[0]
+            sub = cp[1] if len(cp) > 1 else None
+        root = _CAT_ROOT_MERGE.get(root, root)
+        if sub and sub != root:
+            target = _ensure_sub(root, sub)
+        else:
+            target = _ensure_root(root)
+        assignments[row["id"]] = target
+
+    # Persist the new tree, replacing the old coarse one.
+    _cat_save(tree)
+
+    # Re-map items: set category_id to the new node, refresh the category string
+    # to the clean path, and drop stale attributes (schemas changed).
+    id_to_path = {}
+    def _path_name(cid):
+        if cid in id_to_path:
+            return id_to_path[cid]
+        names = []
+        cur = cid
+        seen = set()
+        while cur and cur in tree and cur not in seen:
+            seen.add(cur)
+            names.append(tree[cur]["name"])
+            cur = tree[cur]["parent_id"]
+        p = " - ".join(reversed(names))
+        id_to_path[cid] = p
+        return p
+
+    for row in item_rows:
+        try:
+            it = json.loads(row["data"])
+        except Exception:
+            continue
+        target = assignments.get(row["id"])
+        if not target:
+            continue
+        it["category_id"] = target
+        it["category"] = _path_name(target)
+        d.execute("UPDATE items SET data=?, category_id=? WHERE id=?",
+                  (json.dumps(it), target, row["id"]))
+
+    d.commit()
+
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["_catrebuild_v1"] = True
+    _write_file("st:config", json.dumps(cfg))
+    app.logger.info(f"category rebuild migration applied: {len(tree)} nodes, {len(assignments)} items re-mapped")
 
 
 def _pin_hash(pin):

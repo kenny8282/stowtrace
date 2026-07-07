@@ -2350,8 +2350,9 @@ function renderItemDetail(rec) {
         <button class="${btnClass}" ${btnAttr} title="${btnTitle}">${btnLabel}</button>
       </div>`;
     }
-    if (rec.category) html += `<div class="detail-field"><span class="k">Category</span> ${escapeHtml(rec.category)}</div>`;
-    // Slice 8: hierarchical category (from category_id) + attribute values
+    // Single Category row. Prefer the tree path (category_id); fall back to the
+    // free-text string only when there's no tree link. (Historically both were
+    // stored and could disagree — the tree is the source of truth now.)
     if (rec.category_id && _cat.tree[rec.category_id]) {
       const path = catPath(rec.category_id);
       const breadcrumb = path.map(p => escapeHtml(p.name)).join(' › ');
@@ -2372,9 +2373,9 @@ function renderItemDetail(rec) {
         grid += '</div>';
         html += grid;
       }
-    } else if (rec.category_id) {
-      // Container references a category that no longer exists
-      html += `<div class="detail-field"><span class="k">Category</span> <span style="color:var(--muted);">(deleted category)</span></div>`;
+    } else if (rec.category) {
+      // No tree link — show the original catalog category string.
+      html += `<div class="detail-field"><span class="k">Category</span> ${escapeHtml(rec.category)}</div>`;
     }
     if (rec.notes) html += `<div class="detail-field"><span class="k">Notes</span> ${escapeHtml(rec.notes)}</div>`;
 
@@ -5895,7 +5896,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.2';
+const FRONTEND_BUILD = '2.9.3';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

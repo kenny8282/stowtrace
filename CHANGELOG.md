@@ -3,6 +3,27 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.3 — Category tree rebuilt from real catalog data
+
+The seeded catalog had two disagreeing category systems: detailed strings scraped
+from the shop (e.g. "Toys & Collectables - HotWheels - Matchbox") and a coarse
+15-node tree that force-fit items into wrong buckets. This rebuilds a clean, flat
+category tree from the real strings and re-maps every item. Verified against the
+full 4,056-item catalog — all items re-mapped, all photos preserved.
+
+- ~43 natural top-level categories (Parts, Wheels & Tires, Electronics, Batteries
+  & Chargers, Motors & ESCs, Servos, Toys & Collectables, RTRs & Kits, and so on)
+  with clean sub-categories where the data supported them.
+- Merged obvious corruption/duplicate variants (e.g. "RTRs&"/"RTRsKits" → "RTRs &
+  Kits"; the three "RC Bodies…" variants into one) and dropped scale-fragment
+  artifacts from the scrape.
+- Item detail now shows a single Category (the tree path), not two conflicting
+  rows.
+
+The tree is a clean starting point for the shop to reorganize further — categories
+remain fully editable. Migration runs automatically once on upgrade and is
+idempotent.
+
 ## 2.9.2 — Single category input on item edit
 
 - Removed the redundant free-text Category box on the item edit form. Items now
