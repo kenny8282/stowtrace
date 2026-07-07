@@ -495,6 +495,50 @@
     gap: 12px;
     flex-wrap: wrap;
   }
+  /* Inline quantity stepper: − [input] + */
+  .qty-stepper {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+    height: 34px;
+  }
+  .qty-stepper button {
+    width: 34px;
+    border: none;
+    background: var(--row-alt, #f0f0f0);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--ink, #222);
+    transition: background 0.12s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  .qty-stepper button:hover { background: #e2e2e2; }
+  .qty-stepper button:active { background: #d4d4d4; }
+  .qty-stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .qty-stepper input {
+    width: 62px;
+    border: none;
+    border-left: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'Archivo', sans-serif;
+    -moz-appearance: textfield;
+    background: var(--bg, #fff);
+    color: var(--ink, #222);
+  }
+  .qty-stepper input::-webkit-outer-spin-button,
+  .qty-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .qty-stepper.saving { opacity: 0.6; pointer-events: none; }
+  .qty-label { font-weight: 700; font-size: 11px; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; }
   .buy-btn {
     padding: 6px 12px;
     border: 1px solid var(--rule);
@@ -2226,35 +2270,45 @@ function renderItemDetail(rec) {
     } else {
       html += `<div class="detail-field" style="color:var(--accent);"><span class="k">Stored in</span> Not assigned</div>`;
     }
-    // Quantity row + action button (Buy URL or Google Search).
-    // The button is always rendered for containers (per-row state below).
+    // Quantity stepper row + action button (Buy URL or Google Search).
+    // The stepper lets staff adjust qty inline without opening edit details.
     {
       const buyUrl = (rec.buy_url || '').trim();
       const searchQuery = buildSearchQuery(rec);   // empty string if nothing usable
-      const qtyText = rec.quantity != null ? `<span class="k">Quantity</span> ${rec.quantity}` : '';
 
       let btnLabel, btnClass, btnAttr, btnTitle;
       if (buyUrl) {
-        // Live buy link — highest priority, take it directly
         btnLabel = '🛒 Buy';
         btnClass = 'buy-btn live';
         btnAttr = `onclick="openBuyUrl('${escapeAttr(buyUrl)}')"`;
         btnTitle = `Open: ${escapeAttr(buyUrl)}`;
       } else if (searchQuery) {
-        // No buy URL but we have enough data to Google it
         btnLabel = '🔍 Search';
         btnClass = 'buy-btn search';
         btnAttr = `onclick="openSearch('${escapeAttr(searchQuery)}')"`;
         btnTitle = `Google search: ${escapeAttr(searchQuery)}`;
       } else {
-        // Nothing to do — disabled hint
         btnLabel = '🔍 Search';
         btnClass = 'buy-btn dead';
         btnAttr = 'disabled';
         btnTitle = 'Add manufacturer, SKU, or description to enable search';
       }
+
+      // Inline quantity stepper — only for items that carry a quantity.
+      if (rec.quantity != null) {
+        const q = Number(rec.quantity) || 0;
+        html += `<div class="detail-field detail-qty-row">
+          <span class="qty-label">Quantity</span>
+          <div class="qty-stepper" id="qtyStepper" data-id="${escapeAttr(rec.id)}">
+            <button type="button" onclick="stepQty(-1)" title="Decrease">−</button>
+            <input type="number" id="qtyInput" value="${q}" min="0" inputmode="numeric"
+                   onchange="commitQty(this.value)" onkeydown="if(event.key==='Enter'){this.blur();}">
+            <button type="button" onclick="stepQty(1)" title="Increase">+</button>
+          </div>
+        </div>`;
+      }
+      // Action button on its OWN row (relocated away from the quantity control).
       html += `<div class="detail-field detail-qty-row">
-        ${qtyText}
         <button class="${btnClass}" ${btnAttr} title="${btnTitle}">${btnLabel}</button>
       </div>`;
     }
@@ -3026,6 +3080,65 @@ async function saveItem(id, patch) {
     toast('Network error', 'red');
     return false;
   }
+}
+
+/* ---- INLINE QUANTITY STEPPER ---- */
+// Bump the quantity input by delta and commit. Used by the +/− buttons.
+function stepQty(delta) {
+  const input = el('qtyInput');
+  if (!input) return;
+  const cur = parseInt(input.value, 10) || 0;
+  const next = Math.max(0, cur + delta);
+  input.value = next;
+  commitQty(next);
+}
+
+// Commit a new quantity value to the server. Handles the business-mode
+// reason-code requirement when the quantity is being reduced.
+let _qtyCommitTimer = null;
+async function commitQty(rawVal) {
+  const stepper = el('qtyStepper');
+  const input = el('qtyInput');
+  if (!stepper || !input) return;
+  const id = stepper.dataset.id;
+  let next = parseInt(rawVal, 10);
+  if (isNaN(next) || next < 0) { next = 0; input.value = 0; }
+
+  // Debounce rapid clicks so we send one save, not ten.
+  if (_qtyCommitTimer) clearTimeout(_qtyCommitTimer);
+  _qtyCommitTimer = setTimeout(async () => {
+    // Fetch the current record to know the old qty (for decrease detection).
+    let oldQty = null;
+    try {
+      const r = await fetch(`/api/items/${id}`);
+      const d = await r.json();
+      oldQty = d.record ? Number(d.record.quantity) : null;
+    } catch (e) { /* proceed without old value */ }
+
+    const patch = { quantity: next };
+
+    // Business mode requires a reason when reducing quantity. Ask for it.
+    if (oldQty != null && next < oldQty && _auth.business_mode) {
+      const reason = prompt(
+        `Reducing quantity from ${oldQty} to ${next}.\nReason? (e.g. sold, damaged, used, miscount)`
+      );
+      if (reason === null) {           // cancelled — revert the input
+        input.value = oldQty;
+        return;
+      }
+      patch._reason = reason.trim() || 'adjustment';
+    }
+
+    stepper.classList.add('saving');
+    const saved = await saveItem(id, patch);
+    stepper.classList.remove('saving');
+    if (saved) {
+      toast(`Quantity: ${next}`, 'green');
+    } else {
+      // Save failed (e.g. reason rejected) — restore old value if known.
+      if (oldQty != null) input.value = oldQty;
+    }
+  }, 250);
 }
 
 /* ---- EDIT MODAL ---- */
