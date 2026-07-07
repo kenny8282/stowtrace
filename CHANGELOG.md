@@ -3,6 +3,14 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.7.3 — Login wall fixes
+
+- **The app is now properly blocked until sign-in** in Business Mode. Previously
+  the inventory could be reached without logging in (as a leftover "guest"); the
+  login overlay is now reasserted on every navigation and guest browsing is gone.
+- **No more manual refresh after login** — signing in re-renders the current view
+  immediately so you land on the app, not a stale page.
+
 ## 2.7.2 — Professional login screen + Forge cleanup
 
 - **Redesigned sign-in screen**: branded StowTrace header, larger well-spaced

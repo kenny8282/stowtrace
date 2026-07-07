@@ -1670,6 +1670,12 @@ function toast(msg, color) {
 
 /* ---- TAB SWITCHING ---- */
 function switchTab(name) {
+  // Enforce the login wall: in Business Mode with no signed-in user, the app
+  // is not usable — reassert the login overlay instead of switching tabs.
+  if (_auth.business_mode && !_auth.user) {
+    authGateUI();
+    return;
+  }
   state.currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'tab-' + name));
@@ -5274,13 +5280,16 @@ async function doLogin() {
   clearMsgs();
   el('loginOverlay').style.display = 'none';
   toast(wasFirstLogin ? `PIN set — welcome, ${j.user.username}` : `Signed in as ${j.user.username}`, 'green');
+  // Re-render so the UI reflects the signed-in user without a manual refresh.
+  try {
+    if (typeof refreshItems === 'function') await refreshItems();
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab && activeTab.dataset.tab) switchTab(activeTab.dataset.tab);
+    else switchTab('scan');
+  } catch (e) { /* non-fatal — worst case the user's next click refreshes */ }
 }
 
-function guestBrowse() {
-  _auth.guest = true;
-  el('loginOverlay').style.display = 'none';
-  toast('Browsing as guest — read only', 'gray');
-}
+// (guest browsing removed — Business Mode requires sign-in)
 
 // Emergency backup from the login screen (no credentials needed).
 // Writes a backup to the USB drive; returns success/failure inline so a
@@ -5346,9 +5355,9 @@ async function renderAdminTab() {
   }
   if (!isOwner()) {
     p.innerHTML = `<h2>Account</h2>
-      <div style="font-size:13px;margin-bottom:12px;">Signed in as <strong>${escapeHtml(_auth.user?.username || 'guest')}</strong> (${escapeHtml(_auth.user?.role || 'guest')})</div>
-      ${_auth.user ? '<button class="secondary" onclick="doLogout()">Sign Out</button>' : '<button class="secondary" onclick="_auth.guest=false;authGateUI()">Sign In</button>'}
-      <div style="margin-top:12px;font-size:11px;color:var(--muted);">User management and reports are owner-only.</div>`;
+      <div style="font-size:13px;margin-bottom:12px;">Signed in as <strong>${escapeHtml(_auth.user?.username || '')}</strong> (${escapeHtml(_auth.user?.role || '')})</div>
+      <button class="secondary" onclick="doLogout()">Sign Out</button>
+      <div style="margin-top:12px;font-size:11px;color:var(--muted);">User management, backups, and the audit log are owner-only.</div>`;
     return;
   }
   // Owner view: users + reports + audit
@@ -5691,7 +5700,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.7.2';
+const FRONTEND_BUILD = '2.7.3';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
