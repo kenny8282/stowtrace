@@ -3,6 +3,17 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.8.0 — Auto-backup scheduler + delete gating
+
+- **Scheduled auto-backup now runs.** A systemd timer polls hourly; when the
+  owner's configured interval has elapsed and the USB drive is present, it writes
+  a backup automatically and prunes per the retention setting. (The setting
+  existed before; now there's an engine behind it.)
+- **Delete actions gated to manager+** in the UI: item delete (edit modal and
+  stuck-record), category delete, and location delete are hidden or blocked for
+  employees, matching the permission tiers. The backend already enforced this;
+  now the buttons match.
+
 ## 2.7.3 — Login wall fixes
 
 - **The app is now properly blocked until sign-in** in Business Mode. Previously

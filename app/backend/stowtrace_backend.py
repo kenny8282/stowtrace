@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.7.3"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.8.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -571,6 +571,7 @@ _GATE_RULES = [
     ("POST",   "/api/auth/",          None),      # other auth endpoints handle themselves
     ("GET",    "/api/audit",          "owner"),   # audit log = owner only
     ("POST",   "/api/system/backup-now", None),   # emergency USB backup from login screen (no data exposed)
+    ("POST",   "/api/system/auto-backup-tick", None),  # timer-driven maintenance hook (localhost)
     ("POST",   "/api/system/backup-settings", "owner"),
     ("GET",    "/api/",               None),      # all other reads open (kiosk)
 
@@ -1717,6 +1718,52 @@ def system_backup_settings_set():
     cfg["backup"] = bk
     _write_file("st:config", json.dumps(cfg))
     return jsonify({"ok": True, **_backup_settings()})
+
+
+@app.route("/api/system/auto-backup-tick", methods=["POST"])
+def system_auto_backup_tick():
+    """Called by a systemd timer (hourly). If auto-backup is enabled and enough
+    hours have elapsed since the last successful auto-backup, run one. This is a
+    localhost-only maintenance hook — no data is returned. It no-ops quietly when
+    auto-backup is off, no drive is present, or the interval hasn't elapsed."""
+    import time as _t
+    settings = _backup_settings()
+    interval_h = settings.get("auto_hours", 0)
+    if not interval_h or interval_h <= 0:
+        return jsonify({"ran": False, "reason": "auto-backup disabled"})
+
+    # Read last auto-backup timestamp from config.
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    last = 0
+    if isinstance(cfg, dict):
+        last = (cfg.get("backup", {}) or {}).get("last_auto_ts", 0)
+    now = int(_t.time())
+    if last and (now - last) < interval_h * 3600:
+        return jsonify({"ran": False, "reason": "interval not elapsed",
+                        "next_in_hours": round((interval_h * 3600 - (now - last)) / 3600, 1)})
+
+    # Check the drive is present before attempting.
+    status = _drive_status()
+    if not status.get("mounted") or not status.get("is_stowtrace_drive"):
+        return jsonify({"ran": False, "reason": "no backup drive"})
+
+    ok, result, code = _write_backup_to_drive()
+    if ok:
+        # Record the timestamp so we don't back up again until the interval passes.
+        if not isinstance(cfg, dict):
+            cfg = {}
+        bk = cfg.get("backup", {}) if isinstance(cfg.get("backup"), dict) else {}
+        bk["last_auto_ts"] = now
+        cfg["backup"] = bk
+        _write_file("st:config", json.dumps(cfg))
+        _audit("auto_backup", detail={"filename": result.get("filename")},
+               user={"username": "(auto)", "role": None})
+        return jsonify({"ran": True, "filename": result.get("filename"),
+                        "pruned": result.get("pruned", 0)})
+    return jsonify({"ran": False, "reason": result.get("error", "backup failed")})
 
 
 @app.route("/api/system/drive-backups", methods=["GET"])

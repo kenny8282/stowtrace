@@ -1,0 +1,9 @@
+[Unit]
+Description=StowTrace auto-backup tick (checks if a scheduled USB backup is due)
+After=network.target st-backend.service
+
+[Service]
+Type=oneshot
+# Curl the localhost tick endpoint. The backend decides whether a backup is
+# actually due based on the owner's auto-backup interval setting.
+ExecStart=/usr/bin/curl -sk -X POST https://localhost/api/system/auto-backup-tick

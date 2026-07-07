@@ -1,0 +1,12 @@
+[Unit]
+Description=StowTrace auto-backup timer (fires hourly; backend decides if a backup is due)
+
+[Timer]
+# Fire ~5 minutes after boot, then every hour. The backend no-ops unless the
+# owner's configured interval has elapsed, so hourly polling is cheap.
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

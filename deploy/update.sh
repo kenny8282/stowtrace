@@ -56,6 +56,14 @@ sed -e "s/^User=.*/User=$SERVICE_USER/" \
     > /etc/systemd/system/st-backend.service
 systemctl daemon-reload
 
+echo "==> Refreshing auto-backup timer"
+if [ -f "$SRC_DIR/deploy/etc/st-auto-backup.service" ] && [ -f "$SRC_DIR/deploy/etc/st-auto-backup.timer" ]; then
+  cp "$SRC_DIR/deploy/etc/st-auto-backup.service" /etc/systemd/system/st-auto-backup.service
+  cp "$SRC_DIR/deploy/etc/st-auto-backup.timer"   /etc/systemd/system/st-auto-backup.timer
+  systemctl daemon-reload
+  systemctl enable --now st-auto-backup.timer >/dev/null 2>&1 || true
+fi
+
 echo "==> Refreshing update.sh itself"
 cp "$SRC_DIR/deploy/update.sh" "$INSTALL_DIR/update.sh"
 chmod +x "$INSTALL_DIR/update.sh"

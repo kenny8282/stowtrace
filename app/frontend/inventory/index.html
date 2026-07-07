@@ -2453,7 +2453,7 @@ function showNewItemForm(id, alreadyExists, lineText) {
   const headline = alreadyExists ? 'Choose a type' : 'New label';
   const tag = alreadyExists ? 'UNCATEGORIZED · CHOOSE BELOW' : 'NEW · NOT IN REGISTRY';
   // Existing records can be deleted from here (clear out stuck scans)
-  const deleteBtn = alreadyExists
+  const deleteBtn = (alreadyExists && canManage())
     ? `<button class="secondary" style="margin-top:14px;width:100%;color:#d33;border-color:#d33;" onclick="deleteUncategorized('${id}')">🗑 Delete this record</button>`
     : '';
   // Encode line text safely so we can pass it through inline onclick handlers
@@ -3254,9 +3254,9 @@ async function openEditModal(id, defaults) {
       <button class="green" onclick="saveEdit('${id}')">Save</button>
       <button class="secondary" onclick="closeEditModal()">Cancel</button>
     </div>
-    <div class="btn-row" style="margin-top: 8px;">
+    ${canManage() ? `<div class="btn-row" style="margin-top: 8px;">
       <button class="warn" onclick="deleteItem('${id}')">Delete</button>
-    </div>
+    </div>` : ''}
   `;
   el('editModal').classList.add('open');
   // Populate sub-items editor (deferred until after innerHTML is in the DOM)
@@ -5154,6 +5154,7 @@ async function locOpenEdit() {
   const action = prompt(`Location "${node.name}" — type a new name to rename, or type DELETE to remove:`, node.name);
   if (action === null) return;
   if (action.trim().toUpperCase() === 'DELETE') {
+    if (!canManage()) { toast('Only managers and owners can delete locations', 'red'); return; }
     const children = locChildren(id);
     let url = '/api/loctree/' + id;
     if (children.length) {
@@ -5700,7 +5701,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.7.3';
+const FRONTEND_BUILD = '2.8.0';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
