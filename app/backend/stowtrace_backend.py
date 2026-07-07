@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.3"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.4"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -604,127 +604,213 @@ def _migrate_location_restructure(d):
         app.logger.info("location restructure migration applied")
 
 
-# Root-level merges: pure corruption/casing variants of the SAME category.
-_CAT_ROOT_MERGE = {
-    "Promoto": "Promoto-MX",
-    "Motors & ESC's": "Motors & ESCs",
-    "RC Bodies": "RC Bodies, Paints & Accessories",
-    "RC Bodies & Accessories": "RC Bodies, Paints & Accessories",
-    "Bodies & Paint": "RC Bodies, Paints & Accessories",
-    "Adhesives": "Adhesive & Threadlocker",
-    "Tires, Wheels & Accessories": "Wheels & Tires",
-    "Grease & Oil": "RC Shock & Differential Oils, Greases & Fluids",
-    "Nitro Fuel": "Nitro",
-    "Body Clips": "Hardware",
-    "Pins": "Hardware",
-}
+# ---------------------------------------------------------------------------
+# Category rebuild (v2.9.4): rebuild a GROUPED category tree (like the original
+# curated one) from the scraped category strings, with smart routing that also
+# reads item descriptions to place "Unclassified" items sensibly. Idempotent.
+# ---------------------------------------------------------------------------
+
+# The target grouped structure: top-level group -> ordered sub-categories.
+_CAT_GROUPS = [
+    ("Vehicles", ["RTR Cars & Trucks", "Kits & Rollers", "Monster Trucks",
+                  "Crawlers", "Buggies & Truggies", "On-Road & Drift",
+                  "Boats", "Air", "Nitro", "Motorcycles"]),
+    ("Electronics", ["Motors", "ESCs", "Motor & ESC Combos", "Servos",
+                     "Radios & Receivers", "Batteries", "Chargers",
+                     "Connectors & Wiring", "Lighting", "Gyros & Electronics"]),
+    ("Bodies, Paint & Accessories", ["Bodies", "Paint & Supplies",
+                                     "Body Accessories", "Wings & Spoilers"]),
+    ("Wheels & Tires", ["Crawler", "Monster Truck", "On-Road", "Buggy",
+                        "Short Course", "Drift", "Accessories"]),
+    ("Parts & Hop-Ups", ["Drivetrain", "Suspension & Shocks", "Chassis & Steering",
+                         "Gears & Pinions", "Bearings & Bushings", "Hex & Wheel Hubs",
+                         "Body Mounts & Posts", "Bumpers", "General Parts"]),
+    ("Hardware & Fasteners", ["Screws & Fasteners", "Body Clips", "Hardware Kits",
+                              "Pins & Washers"]),
+    ("Tools & Equipment", ["Hand Tools", "Hex Wrenches & Drivers", "Building Tools",
+                           "Gauges & Stands", "Storage"]),
+    ("Oils, Grease & Fluids", []),
+    ("Toys & Collectables", ["Hot Wheels & Matchbox", "Other Toys"]),
+    ("Apparel & Merch", []),
+    ("Miscellaneous", []),
+]
 
 
-def _cat_clean_parts(s):
-    """Turn a raw scraped category string into cleaned [root, sub?] parts.
-    Repairs the '&'/plural corruption and drops scale-fragment split artifacts."""
-    import re as _re
-    if not s:
-        return None
-    s = s.replace("RTRs& - Kits", "RTRs & Kits").replace("RTRsKits", "RTRs & Kits")
-    s = _re.sub(r"^RTRs - Kits", "RTRs & Kits", s)
-    s = s.replace("OilsGreasesFluids", "Oils, Greases & Fluids")
-    s = s.replace("Oils& - Greases& - Fluids", "Oils, Greases & Fluids")
-    s = s.replace("Oils - Greases - Fluids", "Oils, Greases & Fluids")
-    parts = [p.strip() for p in s.split(" - ")]
-    cleaned = []
-    for p in parts:
-        pu = p.upper()
-        if p.isdigit():
-            continue
-        if _re.match(r"^\d+(ST|ND|RD|TH)?$", pu):
-            continue
-        if "SCALE" in pu and len(p) < 18 and any(c.isdigit() for c in p):
-            continue
-        cleaned.append(p)
-    if cleaned and cleaned[0].isupper() and len(cleaned[0]) > 2:
-        cleaned[0] = cleaned[0].title()
-    return cleaned or None
+def _cat_route(cat):
+    """Route a raw category string to (group, sub_or_None)."""
+    if not cat or cat.strip() in ("Unclassified", "Accessories"):
+        return ("Miscellaneous", None)
+    c = cat.lower()
+    def has(*ks): return any(k in c for k in ks)
+    if has("hotwheels", "hot wheels", "matchbox"): return ("Toys & Collectables", "Hot Wheels & Matchbox")
+    if has("toys & collectables", "diecast"): return ("Toys & Collectables", "Other Toys")
+    if "apparel" in c: return ("Apparel & Merch", None)
+    if has("oil", "grease", "fluid", "differential oils"): return ("Oils, Grease & Fluids", None)
+    if "esc" in c and ("motor" in c and "combo" in c): return ("Electronics", "Motor & ESC Combos")
+    if "esc" in c: return ("Electronics", "ESCs")
+    if "motors & escs" in c or c.startswith("electronics - motors") or c == "motors": return ("Electronics", "Motors")
+    if "servo" in c: return ("Electronics", "Servos")
+    if has("radio", "receiver", "transmitter", "transponder"): return ("Electronics", "Radios & Receivers")
+    if has("batter", "lipo", "li-ion"): return ("Electronics", "Batteries")
+    if "charger" in c: return ("Electronics", "Chargers")
+    if has("connector", "wiring", "wire"): return ("Electronics", "Connectors & Wiring")
+    if "lighting" in c: return ("Electronics", "Lighting")
+    if has("gyro", "simulator", "electronics", "fans & heat"): return ("Electronics", "Gyros & Electronics")
+    if "wheels & tires" in c or ("tires" in c and "wheel" in c):
+        if "crawler" in c: return ("Wheels & Tires", "Crawler")
+        if "monster" in c: return ("Wheels & Tires", "Monster Truck")
+        if has("on-road", "touring"): return ("Wheels & Tires", "On-Road")
+        if "buggy" in c: return ("Wheels & Tires", "Buggy")
+        if "short course" in c: return ("Wheels & Tires", "Short Course")
+        if "drift" in c: return ("Wheels & Tires", "Drift")
+        if "accessor" in c: return ("Wheels & Tires", "Accessories")
+        return ("Wheels & Tires", None)
+    if has("bodies", "body", "paint"):
+        if "paint" in c: return ("Bodies, Paint & Accessories", "Paint & Supplies")
+        if "wing" in c: return ("Bodies, Paint & Accessories", "Wings & Spoilers")
+        if has("accessor", "cage", "support"): return ("Bodies, Paint & Accessories", "Body Accessories")
+        return ("Bodies, Paint & Accessories", "Bodies")
+    if "body clip" in c: return ("Hardware & Fasteners", "Body Clips")
+    if has("screw", "fastener"): return ("Hardware & Fasteners", "Screws & Fasteners")
+    if "hardware kit" in c: return ("Hardware & Fasteners", "Hardware Kits")
+    if has("pins", "washer") and "suspension" not in c: return ("Hardware & Fasteners", "Pins & Washers")
+    if c.startswith("hardware"): return ("Hardware & Fasteners", None)
+    if has("tools and equipment", "building tools", "tool"):
+        if has("hex", "nut driver", "wrench"): return ("Tools & Equipment", "Hex Wrenches & Drivers")
+        if "building" in c: return ("Tools & Equipment", "Building Tools")
+        if has("gauge", "stand"): return ("Tools & Equipment", "Gauges & Stands")
+        if has("storage", "bag", "bin"): return ("Tools & Equipment", "Storage")
+        if has("plier", "reamer"): return ("Tools & Equipment", "Hand Tools")
+        return ("Tools & Equipment", "Hand Tools")
+    if "ball bearing" in c: return ("Parts & Hop-Ups", "Bearings & Bushings")
+    if has("adhesive", "threadlock"): return ("Hardware & Fasteners", None)
+    if has("rtr", "kits", "roller"): return ("Vehicles", "RTR Cars & Trucks")
+    if "monster truck" in c: return ("Vehicles", "Monster Trucks")
+    if has("crawler", "rock crawler"): return ("Vehicles", "Crawlers")
+    if has("buggy", "buggies", "truggy"): return ("Vehicles", "Buggies & Truggies")
+    if has("touring", "drift", "on-road", "stadium", "stunt", "desert"): return ("Vehicles", "On-Road & Drift")
+    if "boat" in c: return ("Vehicles", "Boats")
+    if has("air", "airplane", "heli", "drone", "propeller"): return ("Vehicles", "Air")
+    if "nitro" in c: return ("Vehicles", "Nitro")
+    if has("promoto", "motor cycle", "motorcycle"): return ("Vehicles", "Motorcycles")
+    if "military" in c: return ("Vehicles", "RTR Cars & Trucks")
+    if c.startswith("parts") or c == "parts":
+        if has("drivetrain", "diff", "axle", "gearbox", "portal", "cvd", "driveshaft", "transmission", "outdrive", "slipper", "dogbone"): return ("Parts & Hop-Ups", "Drivetrain")
+        if has("shock", "suspension", "hinge pin", "arm", "spring"): return ("Parts & Hop-Ups", "Suspension & Shocks")
+        if has("chassis", "steering", "bulkhead", "skid"): return ("Parts & Hop-Ups", "Chassis & Steering")
+        if has("gear", "pinion", "spur"): return ("Parts & Hop-Ups", "Gears & Pinions")
+        if has("bearing", "bushing"): return ("Parts & Hop-Ups", "Bearings & Bushings")
+        if has("hex", "wheel hub", "brake disc"): return ("Parts & Hop-Ups", "Hex & Wheel Hubs")
+        if has("body post", "body mount", "mount"): return ("Parts & Hop-Ups", "Body Mounts & Posts")
+        if "bumper" in c: return ("Parts & Hop-Ups", "Bumpers")
+        return ("Parts & Hop-Ups", "General Parts")
+    return ("Miscellaneous", None)
+
+
+def _cat_route_by_desc(desc):
+    """Fallback routing for Unclassified items, using description keywords.
+    Order matters: check 'bearing' before 'led' (avoids matching 'seaLED')."""
+    if not desc:
+        return ("Miscellaneous", None)
+    c = desc.lower()
+    def has(*ks): return any(k in c for k in ks)
+    if "servo" in c: return ("Electronics", "Servos")
+    if has("esc", "speed control"): return ("Electronics", "ESCs")
+    if has("lipo", "battery", "nimh"): return ("Electronics", "Batteries")
+    if "charger" in c: return ("Electronics", "Chargers")
+    if has("receiver", "transmitter", "radio"): return ("Electronics", "Radios & Receivers")
+    if has("brushless motor", "brushed motor", " motor;", " motor ", "motor)", "kv motor"): return ("Electronics", "Motors")
+    if "gyro" in c: return ("Electronics", "Gyros & Electronics")
+    # bearings BEFORE lighting so 'sealed' doesn't match 'led'
+    if has("bearing", "bushing"): return ("Parts & Hop-Ups", "Bearings & Bushings")
+    if has("led light", "light bar", "lighting", "led)"): return ("Electronics", "Lighting")
+    if has("wheelie bar",): return ("Parts & Hop-Ups", "General Parts")
+    if has("tire", "wheel ", "wheels", "foam", "beadlock", "rim") and "wheel nut" not in c and "wheel hub" not in c: return ("Wheels & Tires", None)
+    if has("lexan", "clear body", "polycarb", "decal", "sticker", "wrap"): return ("Bodies, Paint & Accessories", "Bodies")
+    if has("paint", "spray can"): return ("Bodies, Paint & Accessories", "Paint & Supplies")
+    if has("shock", "spring", "damper"): return ("Parts & Hop-Ups", "Suspension & Shocks")
+    if has("suspension", "a-arm", "lower arm", "upper arm", "trailing arm", " arm ", "arm set", "arm assembly", "arms", "hinge pin", "turnbuckle", "camber", "toe link", "drag link", "link set", "links set"): return ("Parts & Hop-Ups", "Suspension & Shocks")
+    if has("diff", "differential", "driveshaft", "cvd", "axle", "portal", "outdrive", "gearbox", "transmission", "slipper", "dogbone"): return ("Parts & Hop-Ups", "Drivetrain")
+    if has("chassis", "bulkhead", "steering", "skid", "brace"): return ("Parts & Hop-Ups", "Chassis & Steering")
+    if has("spur", "pinion", "gear"): return ("Parts & Hop-Ups", "Gears & Pinions")
+    if has("wheel hub", "hex ", "brake disc", "knuckle", "spindle"): return ("Parts & Hop-Ups", "Hex & Wheel Hubs")
+    if has("body post", "body mount", "body clip"): return ("Parts & Hop-Ups", "Body Mounts & Posts")
+    if "bumper" in c: return ("Parts & Hop-Ups", "Bumpers")
+    if has("screw", "bolt", "nut ", "washer", "standoff", "stand off", "fastener"): return ("Hardware & Fasteners", "Screws & Fasteners")
+    if "clip" in c: return ("Hardware & Fasteners", "Body Clips")
+    if has("wrench", "driver", "tool", "plier", "reamer"): return ("Tools & Equipment", "Hand Tools")
+    if has("oil", "grease", "fluid", "lube"): return ("Oils, Grease & Fluids", None)
+    if has("mount", "plate", "holder", "adapter", "spacer", "shim", " pin", "ball", "filter"): return ("Parts & Hop-Ups", "General Parts")
+    return ("Miscellaneous", None)
 
 
 def _migrate_category_rebuild(d):
-    """Rebuild a clean, flat category tree from item category strings and re-map
-    every item's category_id. Idempotent via a config marker. Only runs when
-    there is data to migrate."""
+    """Rebuild a grouped category tree and re-map every item. Idempotent."""
     try:
         cfg = json.loads(_read_file("st:config") or "{}")
     except Exception:
         cfg = {}
-    if isinstance(cfg, dict) and cfg.get("_catrebuild_v1"):
+    if isinstance(cfg, dict) and cfg.get("_catrebuild_v2"):
         return
 
     item_rows = d.execute("SELECT id, data FROM items WHERE type IN ('item','container')").fetchall()
     if not item_rows:
-        return  # nothing to migrate yet
+        return
 
     import secrets as _secrets
-    # Build the tree: root -> {sub_name -> None}. Track a name->id map.
-    root_ids = {}      # root name -> cat id
-    sub_ids = {}       # (root name, sub name) -> cat id
-    tree = {}          # cat id -> node
+    tree = {}
+    group_ids = {}
+    sub_ids = {}
 
-    def _new_cat_id():
+    def _nid():
         return "cat_" + _secrets.token_hex(4)
 
-    def _ensure_root(name):
-        if name not in root_ids:
-            cid = _new_cat_id()
-            root_ids[name] = cid
-            tree[cid] = {"id": cid, "name": name, "parent_id": None, "attributes": []}
-        return root_ids[name]
+    # Pre-create the full grouped skeleton so the tree is complete & ordered.
+    for gname, subs in _CAT_GROUPS:
+        gid = _nid()
+        group_ids[gname] = gid
+        tree[gid] = {"id": gid, "name": gname, "parent_id": None, "attributes": []}
+        for sname in subs:
+            sid = _nid()
+            sub_ids[(gname, sname)] = sid
+            tree[sid] = {"id": sid, "name": sname, "parent_id": gid, "attributes": []}
 
-    def _ensure_sub(root_name, sub_name):
-        key = (root_name, sub_name)
-        if key not in sub_ids:
-            parent = _ensure_root(root_name)
-            cid = _new_cat_id()
-            sub_ids[key] = cid
-            tree[cid] = {"id": cid, "name": sub_name, "parent_id": parent, "attributes": []}
-        return sub_ids[key]
+    def _resolve(gname, sname):
+        if sname and (gname, sname) in sub_ids:
+            return sub_ids[(gname, sname)]
+        return group_ids.get(gname, group_ids["Miscellaneous"])
 
-    # Assign each item to a (root, sub) and collect the tree.
-    assignments = {}   # item id -> target cat id
+    # Assign items.
+    assignments = {}
     for row in item_rows:
         try:
             it = json.loads(row["data"])
         except Exception:
             continue
-        cp = _cat_clean_parts(it.get("category"))
-        if not cp:
-            root, sub = "Unclassified", None
-        else:
-            root = cp[0]
-            sub = cp[1] if len(cp) > 1 else None
-        root = _CAT_ROOT_MERGE.get(root, root)
-        if sub and sub != root:
-            target = _ensure_sub(root, sub)
-        else:
-            target = _ensure_root(root)
-        assignments[row["id"]] = target
+        raw = it.get("category")
+        g, s = _cat_route(raw)
+        # Any item heading for Miscellaneous gets a second chance via its
+        # description keywords — this drains the catch-all substantially.
+        if g == "Miscellaneous":
+            g2, s2 = _cat_route_by_desc(it.get("description"))
+            if g2 != "Miscellaneous":
+                g, s = g2, s2
+        assignments[row["id"]] = _resolve(g, s)
 
-    # Persist the new tree, replacing the old coarse one.
     _cat_save(tree)
 
-    # Re-map items: set category_id to the new node, refresh the category string
-    # to the clean path, and drop stale attributes (schemas changed).
-    id_to_path = {}
-    def _path_name(cid):
-        if cid in id_to_path:
-            return id_to_path[cid]
-        names = []
-        cur = cid
-        seen = set()
+    # Path label helper.
+    path_cache = {}
+    def _path(cid):
+        if cid in path_cache:
+            return path_cache[cid]
+        names, cur, seen = [], cid, set()
         while cur and cur in tree and cur not in seen:
             seen.add(cur)
             names.append(tree[cur]["name"])
             cur = tree[cur]["parent_id"]
         p = " - ".join(reversed(names))
-        id_to_path[cid] = p
+        path_cache[cid] = p
         return p
 
     for row in item_rows:
@@ -736,17 +822,16 @@ def _migrate_category_rebuild(d):
         if not target:
             continue
         it["category_id"] = target
-        it["category"] = _path_name(target)
+        it["category"] = _path(target)
         d.execute("UPDATE items SET data=?, category_id=? WHERE id=?",
                   (json.dumps(it), target, row["id"]))
 
     d.commit()
-
     if not isinstance(cfg, dict):
         cfg = {}
-    cfg["_catrebuild_v1"] = True
+    cfg["_catrebuild_v2"] = True
     _write_file("st:config", json.dumps(cfg))
-    app.logger.info(f"category rebuild migration applied: {len(tree)} nodes, {len(assignments)} items re-mapped")
+    app.logger.info(f"category rebuild v2 applied: {len(tree)} nodes, {len(assignments)} items")
 
 
 def _pin_hash(pin):

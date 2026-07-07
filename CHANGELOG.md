@@ -3,6 +3,22 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.4 — Grouped category tree with smart routing
+
+Replaces the flat category rebuild (2.9.3) with a curated GROUPED tree, closer to
+the original organization but far more complete. Similar items are grouped under
+logical parents, and the miscellaneous pile is drained by reading item
+descriptions. Verified against the full 4,056-item catalog.
+
+- Top-level groups: Vehicles, Electronics, Bodies/Paint & Accessories, Wheels &
+  Tires, Parts & Hop-Ups, Hardware & Fasteners, Tools & Equipment, Oils/Grease &
+  Fluids, Toys & Collectables, Apparel & Merch — each with detailed sub-categories.
+- Smart routing places items by their catalog category, then falls back to
+  description keywords for anything that was "Unclassified" — cutting the
+  miscellaneous pile from ~800 items to 27.
+- All items re-mapped, all photos preserved. Categories remain fully editable for
+  further hand-tuning.
+
 ## 2.9.3 — Category tree rebuilt from real catalog data
 
 The seeded catalog had two disagreeing category systems: detailed strings scraped
