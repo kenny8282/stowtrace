@@ -798,15 +798,19 @@
   .cat-tree-node {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 10px;
+    padding: 12px 14px;
     background: var(--paper);
     border: 1px solid var(--rule);
-    border-radius: 3px;
+    border-radius: 6px;
+    margin-bottom: 6px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.12s, border-color 0.12s;
   }
-  .cat-tree-node:hover { background: var(--row-alt, #f0f0f0); }
+  .cat-tree-node:hover {
+    background: var(--row-alt, #f5f3ee);
+    border-color: var(--muted);
+  }
   .cat-tree-node .cat-name {
     flex: 1;
     font-weight: 600;
@@ -816,13 +820,16 @@
     font-size: 11px;
     color: var(--muted);
     font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
   }
   .cat-tree-node .cat-chevron {
     color: var(--muted);
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
   }
   .cat-tree-node.leaf {
-    background: linear-gradient(to right, transparent 95%, var(--accent-2) 95%);
+    /* leaf categories are visually identical — no distracting edge bar */
   }
   .cat-tree-node.empty {
     color: var(--muted);
@@ -3218,10 +3225,6 @@ async function openEditModal(id, defaults) {
         <label>Quantity</label>
         <input type="number" id="edQty" value="${rec.quantity ?? ''}" min="0">
       </div>
-      <div class="field">
-        <label>Category</label>
-        <input type="text" id="edCategory" value="${escapeHtml(rec.category || '')}">
-      </div>
     </div>
     <div class="field">
       <label>Manufacturer / Brand &amp; SKU</label>
@@ -3347,6 +3350,12 @@ async function saveEdit(id) {
 
   // Category + attribute values
   const categoryId = (el('edCategoryId')?.value || '').trim() || null;
+  // The human-readable category string is derived from the picked category
+  // (the free-text box was removed — the picker is the single source of truth).
+  let categoryName = null;
+  if (categoryId && _cat.tree[categoryId]) {
+    categoryName = catPath(categoryId).map(p => p.name).join(' - ');
+  }
   const attrs = {};
   document.querySelectorAll('#edAttrFields .attr-input').forEach(inp => {
     const key = inp.dataset.attrKey;
@@ -3371,7 +3380,7 @@ async function saveEdit(id) {
     location: el('edLoc').value.trim() || null,
     bin_id: (el('edBinId').value.trim().toUpperCase()) || null,
     quantity: el('edQty').value === '' ? null : parseInt(el('edQty').value),
-    category: el('edCategory').value.trim() || null,
+    category: categoryName,
     supplier: el('edSupplier').value.trim() || null,
     supplier_sku: el('edSku').value.trim() || null,
     notes: el('edNotes').value.trim() || null,
@@ -5886,7 +5895,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.0';
+const FRONTEND_BUILD = '2.9.2';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
