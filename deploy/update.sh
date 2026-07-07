@@ -98,19 +98,19 @@ echo "==> Clearing update cache"
 rm -f /var/lib/stowtrace/update-cache.json || true
 
 echo "==> Restarting service"
-systemctl restart stowtrace-backend
+systemctl restart st-backend
 sleep 2
 
 if [ "$CLEANUP" = "1" ]; then
   rm -rf "$SRC_DIR"
 fi
 
-if systemctl is-active --quiet stowtrace-backend; then
+if systemctl is-active --quiet st-backend; then
   echo
   echo "âœ“ Update complete. Service is running."
 else
   echo
   echo "! Service didn't come back up. Check:"
-  echo "  sudo journalctl -u stowtrace-backend -n 30 --no-pager"
+  echo "  sudo journalctl -u st-backend -n 30 --no-pager"
   exit 1
 fi

@@ -11,8 +11,8 @@ PURGE=0
 if [ "${1:-}" = "--purge" ]; then PURGE=1; fi
 
 echo "==> Stopping service"
-systemctl stop stowtrace-backend 2>/dev/null || true
-systemctl disable stowtrace-backend 2>/dev/null || true
+systemctl stop st-backend 2>/dev/null || true
+systemctl disable st-backend 2>/dev/null || true
 rm -f /etc/systemd/system/st-backend.service
 systemctl daemon-reload
 

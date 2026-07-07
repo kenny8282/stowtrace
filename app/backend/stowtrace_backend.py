@@ -553,6 +553,7 @@ _GATE_RULES = [
     ("DELETE", "/api/categories/",  "manager"),
     ("DELETE", "/api/loctree/",     "manager"),
     ("POST",   "/api/system/restore", "owner"),
+    ("POST",   "/api/ap/config",    "owner"),   # change hotspot SSID/pw = owner only
     ("POST",   "/api/reset",        "owner"),
     ("POST",   "/api/categories",   "manager"),
     ("PUT",    "/api/categories/",  "manager"),
@@ -2644,6 +2645,90 @@ def wifi_saved():
             "autoconnect": autoconnect.lower() == "yes",
         })
     return jsonify({"available": True, "networks": out})
+
+
+@app.route("/api/ap/config", methods=["GET"])
+def ap_config_get():
+    """Return the current AP (hotspot) SSID. Never returns the password."""
+    ok, _reason = _wifi_available()
+    if not ok:
+        return jsonify({"available": False})
+    ssid = None
+    r = _nmcli("-t", "-f", "802-11-wireless.ssid", "connection", "show", "store-ap")
+    if r and r.returncode == 0:
+        for line in r.stdout.splitlines():
+            if ":" in line:
+                ssid = line.split(":", 1)[1].strip()
+                break
+    return jsonify({"available": True, "ssid": ssid or "stowtrace"})
+
+
+@app.route("/api/ap/config", methods=["POST"])
+def ap_config_set():
+    """Change the AP hotspot SSID and/or password, then reboot to apply.
+
+    Safety: we VALIDATE everything first and only modify the connection after
+    all checks pass, so a bad input can never leave the AP half-configured.
+    The change is applied to the 'store-ap' connection created by
+    store-ap-setup.sh. A delayed reboot (via systemd-run) lets us return a
+    response before the box goes down.
+    """
+    ok, _reason = _wifi_available()
+    if not ok:
+        abort(400, description="WiFi not available on this device")
+
+    body = request.get_json(silent=True) or {}
+    ssid = (body.get("ssid") or "").strip()
+    password = body.get("password") or ""
+
+    # --- validate BEFORE touching anything ---
+    if not ssid:
+        abort(400, description="ssid required")
+    if len(ssid) > 32:
+        abort(400, description="ssid too long (max 32 chars for WiFi)")
+    if len(password) < 8 or len(password) > 63:
+        abort(400, description="AP password must be 8-63 characters (WPA2 requirement)")
+
+    # Confirm the store-ap connection exists before we try to modify it.
+    check = _nmcli("-t", "-f", "connection.id", "connection", "show", "store-ap")
+    if not check or check.returncode != 0:
+        return jsonify({"ok": False, "error": "AP is not set up yet (run store-ap-setup.sh first)"}), 400
+
+    # --- apply: modify the existing store-ap connection ---
+    r = _nmcli(
+        "connection", "modify", "store-ap",
+        "802-11-wireless.ssid", ssid,
+        "wifi-sec.key-mgmt", "wpa-psk",
+        "wifi-sec.psk", password,
+        timeout=15, capture_password=True,
+    )
+    if r is None or r.returncode != 0:
+        err = (r.stderr if r else "nmcli unavailable") or "AP update failed"
+        return jsonify({"ok": False, "error": err.strip()}), 500
+
+    # --- schedule reboot so the new AP settings take effect cleanly ---
+    try:
+        rb = subprocess.run(
+            ["sudo", "-n", "systemd-run",
+             "--unit=st-reboot-runner", "--collect", "--no-block",
+             "--on-active=5", "/sbin/reboot"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if rb.returncode != 0:
+            subprocess.Popen(
+                ["sudo", "-n", "/sbin/reboot"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "ssid": ssid,
+        "rebooting": True,
+        "message": "AP updated. The device will reboot in 5 seconds. Reconnect to the new WiFi name.",
+    })
 
 
 @app.route("/api/wifi/connect", methods=["POST"])

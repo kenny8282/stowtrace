@@ -233,6 +233,29 @@
     <h2>Saved Networks</h2>
     <div id="savedList"></div>
   </div>
+
+  <div class="panel" id="apPanel">
+    <h2>Access Point (Hotspot)</h2>
+    <p style="font-size:13px;color:#666;margin:4px 0 12px;">
+      This is the WiFi network staff join to reach StowTrace. Changing it
+      reboots the device; you'll reconnect to the new name.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:420px;">
+      <label style="font-size:13px;font-weight:600;">Network name (SSID)
+        <input id="apSsid" type="text" maxlength="32" placeholder="stowtrace"
+               style="width:100%;padding:8px;margin-top:4px;border:1px solid #ccc;border-radius:6px;font-size:14px;">
+      </label>
+      <label style="font-size:13px;font-weight:600;">Password (8–63 characters)
+        <input id="apPass" type="text" maxlength="63" placeholder="stowtrace"
+               style="width:100%;padding:8px;margin-top:4px;border:1px solid #ccc;border-radius:6px;font-size:14px;">
+      </label>
+      <div id="apMsg" style="font-size:13px;min-height:18px;"></div>
+      <button id="apSaveBtn" onclick="saveAp()"
+              style="padding:10px;background:#c0392b;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
+        Save &amp; Reboot
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- Password / connect modal -->
@@ -471,10 +494,55 @@ async function forgetNetwork(name) {
 
 el('rescanBtn').addEventListener('click', loadScan);
 
+async function loadAp() {
+  try {
+    const r = await fetch('/api/ap/config').then(r => r.json());
+    if (r.available === false) {
+      el('apPanel').style.display = 'none';
+      return;
+    }
+    el('apSsid').value = r.ssid || 'stowtrace';
+  } catch (e) {
+    el('apPanel').style.display = 'none';
+  }
+}
+
+async function saveAp() {
+  const ssid = el('apSsid').value.trim();
+  const pass = el('apPass').value;
+  const msg = el('apMsg');
+  msg.style.color = '#c0392b';
+  if (!ssid) { msg.textContent = 'Network name is required.'; return; }
+  if (pass.length < 8 || pass.length > 63) { msg.textContent = 'Password must be 8–63 characters.'; return; }
+  if (!confirm('Change the hotspot to "' + ssid + '" and reboot now? You will need to reconnect to the new WiFi name.')) return;
+  el('apSaveBtn').disabled = true;
+  msg.style.color = '#666';
+  msg.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/ap/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid, password: pass })
+    }).then(r => r.json());
+    if (r.ok) {
+      msg.style.color = '#27ae60';
+      msg.textContent = 'Saved. Rebooting… reconnect to "' + ssid + '" in about a minute.';
+    } else {
+      msg.style.color = '#c0392b';
+      msg.textContent = r.error || 'Update failed.';
+      el('apSaveBtn').disabled = false;
+    }
+  } catch (e) {
+    msg.style.color = '#c0392b';
+    msg.textContent = 'Request failed (the device may already be rebooting).';
+  }
+}
+
 async function refreshAll() {
   await loadStatus();
   await loadScan();
   await loadSaved();
+  await loadAp();
 }
 
 refreshAll();
