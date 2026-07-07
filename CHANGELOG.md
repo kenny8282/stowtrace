@@ -3,13 +3,6 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
-## 2.9.1 — Menu styling cleanup
-
-- Removed the stray blue box that appeared over the item count and chevron on
-  category (and location) rows — it came from a leaf-category edge indicator that
-  rendered as a solid block. Tree-menu rows now have cleaner spacing, rounded
-  corners, and a subtle hover. Applies to both the Categories and Locations tabs.
-
 ## 2.9.0 — Location restructure: SKU items, one hierarchical location tree
 
 A significant restructure of how items and locations work. **Your existing AZ
