@@ -3,6 +3,15 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.7.0 — Restore from USB drive
+
+- **Restore from USB Drive** button (Label Forge → Backup & Restore): lists the
+  timestamped backups on the drive with date/size, so you can pick the exact one
+  to restore instead of hunting through the file picker. Restore stays additive
+  (only missing items are added; current data is never overwritten).
+- Backup-drive status now reflects the marker check and backup count; the restore
+  button enables only when the drive holds at least one backup.
+
 ## 2.6.1 — Login UX + exit Business Mode
 
 - **Typed username at login** (was a dropdown) so browsers can save and autofill

@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.6.1"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.7.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -579,6 +579,7 @@ _GATE_RULES = [
     ("PUT",    "/api/users/",         "owner"),
     ("DELETE", "/api/users/",         "owner"),
     ("POST",   "/api/system/restore", "owner"),
+    ("POST",   "/api/system/restore-from-drive", "owner"),
     ("POST",   "/api/reset",          "owner"),
 
     # --- manager+ ---
@@ -1718,18 +1719,54 @@ def system_backup_settings_set():
     return jsonify({"ok": True, **_backup_settings()})
 
 
-@app.route("/api/system/restore", methods=["POST"])
-def system_restore():
-    """Merge a backup file's contents into current state. Current state wins
-    on any conflict (per Slice 6 spec: 'only restore IDs/items not currently
-    present'). Accepts both:
-      - stowtrace-backup/v1   (full backup; restores registry+used+presets)
-      - stowtrace-inventory/v1 (inventory-only legacy export; restores registry+used)
-    """
-    data = request.get_json(silent=True)
-    if not data:
-        abort(400, description="no JSON body")
+@app.route("/api/system/drive-backups", methods=["GET"])
+def system_drive_backups():
+    """List the backup files available on the USB drive, newest first."""
+    status = _drive_status()
+    if not status.get("mounted"):
+        return jsonify({"available": False, "reason": "no_drive", "backups": []})
+    if not status.get("is_stowtrace_drive"):
+        return jsonify({"available": False, "reason": "not_stowtrace_drive", "backups": []})
+    subdir = Path(BACKUP_DRIVE_PATH) / BACKUP_SUBDIR
+    items = []
+    if subdir.is_dir():
+        for p in sorted(subdir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+            try:
+                st = p.stat()
+                items.append({
+                    "filename": p.name,
+                    "size_bytes": st.st_size,
+                    "modified": int(st.st_mtime),
+                })
+            except Exception:
+                pass
+    return jsonify({"available": True, "backups": items})
 
+
+@app.route("/api/system/restore-from-drive", methods=["POST"])
+def system_restore_from_drive():
+    """Restore a specific backup file from the USB drive by filename.
+    Same additive merge semantics as /api/system/restore (owner only)."""
+    body = request.get_json(silent=True) or {}
+    filename = (body.get("filename") or "").strip()
+    # Guard against path traversal — only a bare filename in the backups subdir.
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        abort(400, description="invalid filename")
+    path = Path(BACKUP_DRIVE_PATH) / BACKUP_SUBDIR / filename
+    if not path.is_file():
+        abort(404, description="backup not found on drive")
+    try:
+        data = json.loads(path.read_text())
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"could not read backup: {e}"}), 400
+    summary = _apply_restore(data)
+    _audit("restore_from_drive", detail={"filename": filename, **summary})
+    return jsonify({"ok": True, "summary": summary})
+
+
+def _apply_restore(data):
+    """Merge a backup dict into current state (additive; current wins on conflict).
+    Returns the summary dict. Shared by file-upload and USB-drive restore paths."""
     schema = data.get("schema", "")
     summary = {"added_items": 0, "skipped_items": 0,
                "added_presets": 0, "skipped_presets": 0,
@@ -1882,7 +1919,21 @@ def system_restore():
     if summary["added_photos"]:
         _bump_change()
     d.commit()
+    return summary
 
+
+@app.route("/api/system/restore", methods=["POST"])
+def system_restore():
+    """Merge a backup file's contents into current state. Current state wins
+    on any conflict (per Slice 6 spec: 'only restore IDs/items not currently
+    present'). Accepts both:
+      - stowtrace-backup/v1   (full backup; restores registry+used+presets)
+      - stowtrace-inventory/v1 (inventory-only legacy export; restores registry+used)
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        abort(400, description="no JSON body")
+    summary = _apply_restore(data)
     _audit("restore", detail=summary)
     return jsonify({"ok": True, **summary})
 
