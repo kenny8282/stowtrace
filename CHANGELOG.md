@@ -3,6 +3,14 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.7.2 — Professional login screen + Forge cleanup
+
+- **Redesigned sign-in screen**: branded StowTrace header, larger well-spaced
+  username and PIN fields, and a clear inline error ("Incorrect username or PIN")
+  instead of an easy-to-miss toast. First-sign-in PIN guidance shows inline too.
+- **Backup & Restore removed from Label Forge** — it now lives solely in the
+  Inventory Admin panel, so there's one clear home for it.
+
 ## 2.7.1 — Backup/restore in inventory Admin + USB restore fix
 
 - **Full backup & restore now lives in the inventory Admin (⚙) panel**: drive

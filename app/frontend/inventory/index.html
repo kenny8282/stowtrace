@@ -1471,25 +1471,36 @@
   </div>
 </div>
 
-<!-- LOGIN OVERLAY (v2.4.0, business mode only) -->
+<!-- LOGIN OVERLAY (business mode) -->
 <div id="loginOverlay" style="display:none;position:fixed;inset:0;background:var(--paper,#f5f2ea);z-index:2000;align-items:center;justify-content:center;">
-  <div style="max-width:340px;width:90%;border:2px solid var(--ink);padding:24px;background:var(--paper);">
-    <h2 style="margin-top:0;">Sign In</h2>
-    <div class="field">
-      <label>Username</label>
-      <input type="text" id="loginUser" autocomplete="username" placeholder="your username" autocapitalize="off" spellcheck="false">
+  <div style="max-width:380px;width:90%;border:1px solid var(--rule);border-radius:10px;padding:32px 28px;background:var(--bg,#fff);box-shadow:0 8px 32px rgba(0,0,0,0.12);">
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="font-family:'Archivo',sans-serif;font-weight:800;font-size:26px;letter-spacing:0.02em;color:var(--ink,#1a1a1a);">StowTrace</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;letter-spacing:0.04em;">Inventory sign in</div>
     </div>
-    <div class="field">
-      <label>PIN</label>
-      <input type="password" id="loginPin" inputmode="numeric" autocomplete="current-password" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()">
-      <div id="loginHint" style="display:none;font-size:11px;color:var(--accent);margin-top:4px;"></div>
+
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:6px;">Username</label>
+      <input type="text" id="loginUser" autocomplete="username" placeholder="Enter your username" autocapitalize="off" spellcheck="false"
+        style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:16px;border:1px solid var(--rule);border-radius:6px;background:var(--bg,#fff);color:var(--ink,#1a1a1a);"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPin').focus()">
     </div>
-    <div class="btn-row" style="margin-top:14px;">
-      <button class="green" onclick="doLogin()" style="width:100%;">Sign In</button>
+
+    <div style="margin-bottom:8px;">
+      <label style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:6px;">PIN</label>
+      <input type="password" id="loginPin" inputmode="numeric" autocomplete="current-password" placeholder="Enter your PIN"
+        style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:16px;letter-spacing:0.1em;border:1px solid var(--rule);border-radius:6px;background:var(--bg,#fff);color:var(--ink,#1a1a1a);"
+        onkeydown="if(event.key==='Enter')doLogin()">
     </div>
-    <div style="margin-top:14px;text-align:center;font-size:11px;">
-      <a href="#" onclick="loginBackupNow();return false;" style="color:var(--muted);text-decoration:underline;">Back up now to USB</a>
-      <div id="loginBackupMsg" style="margin-top:5px;color:var(--muted);min-height:14px;"></div>
+
+    <div id="loginError" style="display:none;font-size:13px;color:#c0392b;margin:10px 0 0;padding:8px 12px;background:rgba(192,57,43,0.08);border-radius:6px;border:1px solid rgba(192,57,43,0.2);"></div>
+    <div id="loginHint" style="display:none;font-size:12px;color:#1a5d1a;margin:10px 0 0;padding:8px 12px;background:rgba(26,93,26,0.08);border-radius:6px;"></div>
+
+    <button onclick="doLogin()" style="width:100%;margin-top:18px;padding:13px;font-size:15px;font-weight:700;letter-spacing:0.03em;background:var(--ink,#1a1a1a);color:var(--paper,#fff);border:none;border-radius:6px;cursor:pointer;transition:opacity 0.15s;" onmouseover="this.style.opacity=0.85" onmouseout="this.style.opacity=1">Sign In</button>
+
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--rule);text-align:center;">
+      <a href="#" onclick="loginBackupNow();return false;" style="font-size:11px;color:var(--muted);text-decoration:none;">⤓ Emergency backup to USB</a>
+      <div id="loginBackupMsg" style="margin-top:6px;font-size:11px;color:var(--muted);min-height:14px;"></div>
     </div>
   </div>
 </div>
@@ -5233,30 +5244,34 @@ async function authGateUI() {
 async function doLogin() {
   const username = (el('loginUser').value || '').trim();
   const pin = el('loginPin').value;
-  if (!username) { toast('Enter your username', 'red'); el('loginUser').focus(); return; }
+  const errBox = el('loginError');
+  const hintBox = el('loginHint');
+  const showErr = (m) => { if (errBox) { errBox.textContent = m; errBox.style.display = 'block'; } };
+  const clearMsgs = () => { if (errBox) errBox.style.display = 'none'; if (hintBox) hintBox.style.display = 'none'; };
+  clearMsgs();
+  if (!username) { showErr('Please enter your username.'); el('loginUser').focus(); return; }
+  if (!pin) { showErr('Please enter your PIN.'); el('loginPin').focus(); return; }
   const r = await fetch('/api/auth/login', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, pin }) });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
-    // The backend uses a specific message when a first-login PIN is too short,
-    // which lets us show a helpful "choose a PIN" hint for new accounts.
     const d = (j.description || '').toLowerCase();
     if (d.includes('choose a pin')) {
-      const hint = el('loginHint');
-      if (hint) { hint.textContent = 'First login — type the PIN you want (4+ digits) and sign in again.'; hint.style.display = 'block'; }
-      toast('Choose a PIN (4+ digits)', 'red');
+      // First-login: this account has no PIN yet — the entered PIN is too short.
+      if (hintBox) { hintBox.textContent = 'First sign-in: choose a PIN of 4 or more digits. It becomes your PIN.'; hintBox.style.display = 'block'; }
     } else {
-      toast('Wrong username or PIN', 'red');
+      showErr('Incorrect username or PIN. Please try again.');
     }
     el('loginPin').value = '';
+    el('loginPin').focus();
     return;
   }
   const j = await r.json();
   const wasFirstLogin = !!j.first_login;
   _auth.user = j.user;
   el('loginPin').value = '';
-  el('loginHint').style.display = 'none';
+  clearMsgs();
   el('loginOverlay').style.display = 'none';
   toast(wasFirstLogin ? `PIN set — welcome, ${j.user.username}` : `Signed in as ${j.user.username}`, 'green');
 }
@@ -5676,7 +5691,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.7.1';
+const FRONTEND_BUILD = '2.7.2';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

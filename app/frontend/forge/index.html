@@ -1529,33 +1529,7 @@
       </div>
     </div>
 
-    <!-- BACKUP & RESTORE — Slice 6 -->
-    <div class="panel">
-      <h2><span>Backup &amp; Restore</span><span class="num">⤓⤒</span></h2>
-      <div class="hint" style="margin-bottom: 10px;">
-        Save a full snapshot of your inventory (items, used IDs, label presets). Restore from a backup later to recover after an SD card failure or a fresh install.
-      </div>
-      <div class="btn-row">
-        <button id="backupDownloadBtn" class="secondary">⤓ Download Backup</button>
-        <button id="backupToDriveBtn" class="secondary" disabled title="Plug in a USB drive to enable">⤓ Save to USB Drive</button>
-      </div>
-      <div class="hint" id="backupDriveStatus" style="margin-top:8px;font-size:11px;">
-        Checking for backup drive…
-      </div>
-      <div class="btn-row" style="margin-top: 12px;">
-        <button id="restoreBtn" class="secondary">⤒ Restore from File</button>
-        <button id="restoreFromDriveBtn" class="secondary" disabled title="Plug in a USB drive to enable">⤒ Restore from USB Drive</button>
-        <input type="file" id="restoreFile" accept="application/json,.json" style="display:none;" />
-      </div>
-      <div id="driveBackupPicker" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--rule);border-radius:4px;">
-        <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Choose a backup from the USB drive:</div>
-        <div id="driveBackupList" style="font-size:12px;max-height:220px;overflow:auto;"></div>
-        <div style="text-align:right;margin-top:6px;"><button class="secondary" onclick="document.getElementById('driveBackupPicker').style.display='none'">Cancel</button></div>
-      </div>
-      <div class="alert" style="margin-top: 10px;">
-        <b>Restore is additive.</b> Only items not already in your current registry will be added — your existing data is never overwritten or lost.
-      </div>
-    </div>
+    <!-- BACKUP & RESTORE moved to the Inventory app's Admin panel (v2.7.2) -->
 
     <!-- REGISTRY & DATA -->
     <div class="panel">
@@ -3946,17 +3920,7 @@ function setupListeners() {
     e.target.value = '';
   });
 
-  // Slice 6: Backup & Restore
-  el('backupDownloadBtn').addEventListener('click', downloadBackup);
-  el('backupToDriveBtn').addEventListener('click', backupToDrive);
-  el('restoreBtn').addEventListener('click', () => el('restoreFile').click());
-  el('restoreFromDriveBtn').addEventListener('click', showDriveBackupPicker);
-  el('restoreFile').addEventListener('change', e => {
-    if (e.target.files && e.target.files[0]) restoreFromBackup(e.target.files[0]);
-    e.target.value = '';
-  });
-  // Check drive availability now and again whenever the Options tab opens
-  refreshBackupDriveStatus();
+  // Backup & Restore moved to the Inventory app's Admin panel (v2.7.2).
   el('resetBtn').addEventListener('click', async () => {
     if (!confirm('Reset EVERYTHING — all rows, all issued IDs, all registry data, all presets. Continue?')) return;
     if (!confirm('Really? This cannot be undone.')) return;
