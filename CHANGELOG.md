@@ -3,6 +3,15 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.6.1 — Login UX + exit Business Mode
+
+- **Typed username at login** (was a dropdown) so browsers can save and autofill
+  credentials. First-login "choose a PIN" hint now appears on submit.
+- **Exit Business Mode** (owner only, under Admin → Advanced): returns to Home Mode
+  and removes all user accounts. Inventory data is untouched. Gives the owner a
+  clean way back for setup/dev or re-provisioning.
+- **Backup settings auto-save** on change (no Save button); inline ✓ feedback.
+
 ## 2.6.0 — USB backups, founder protection, login-screen backup
 
 **USB backup system**

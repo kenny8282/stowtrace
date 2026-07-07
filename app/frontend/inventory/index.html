@@ -1476,12 +1476,12 @@
   <div style="max-width:340px;width:90%;border:2px solid var(--ink);padding:24px;background:var(--paper);">
     <h2 style="margin-top:0;">Sign In</h2>
     <div class="field">
-      <label>Who are you?</label>
-      <select id="loginUser" onchange="updateLoginHint()"></select>
+      <label>Username</label>
+      <input type="text" id="loginUser" autocomplete="username" placeholder="your username" autocapitalize="off" spellcheck="false">
     </div>
     <div class="field">
       <label>PIN</label>
-      <input type="password" id="loginPin" inputmode="numeric" placeholder="••••" autocomplete="off">
+      <input type="password" id="loginPin" inputmode="numeric" autocomplete="current-password" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()">
       <div id="loginHint" style="display:none;font-size:11px;color:var(--accent);margin-top:4px;"></div>
     </div>
     <div class="btn-row" style="margin-top:14px;">
@@ -5222,53 +5222,41 @@ function isOwner()   { return !_auth.business_mode || (_auth.user && _auth.user.
 
 async function authGateUI() {
   if (_auth.business_mode && !_auth.user) {   // hard login wall — no guest bypass
-    // Show login overlay with the user picker
-    try {
-      const j = await (await fetch('/api/users')).json();
-      _loginUsers = {};
-      el('loginUser').innerHTML = (j.users || [])
-        .map(u => { _loginUsers[u.username] = u; return `<option value="${escapeAttr(u.username)}">${escapeHtml(u.username)}</option>`; }).join('');
-      updateLoginHint();
-    } catch (e) {}
     el('loginOverlay').style.display = 'flex';
+    const uf = el('loginUser');
+    if (uf && !uf.value) uf.focus();
   } else {
     el('loginOverlay').style.display = 'none';
   }
 }
 
-// Track user pin_set status so we can prompt "choose a PIN" on first login.
-let _loginUsers = {};
-function updateLoginHint() {
-  const sel = el('loginUser');
-  const hint = el('loginHint');
-  if (!sel || !hint) return;
-  const u = _loginUsers[sel.value];
-  if (u && !u.pin_set) {
-    hint.textContent = 'First login — choose a PIN (4+ digits). This becomes your PIN.';
-    hint.style.display = 'block';
-    el('loginPin').placeholder = 'Choose a PIN';
-  } else {
-    hint.style.display = 'none';
-    el('loginPin').placeholder = '••••';
-  }
-}
-
 async function doLogin() {
-  const username = el('loginUser').value;
+  const username = (el('loginUser').value || '').trim();
   const pin = el('loginPin').value;
-  const wasFirstLogin = _loginUsers[username] && !_loginUsers[username].pin_set;
+  if (!username) { toast('Enter your username', 'red'); el('loginUser').focus(); return; }
   const r = await fetch('/api/auth/login', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, pin }) });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
-    toast(wasFirstLogin ? (j.description || 'Choose a 4+ digit PIN') : 'Wrong PIN', 'red');
+    // The backend uses a specific message when a first-login PIN is too short,
+    // which lets us show a helpful "choose a PIN" hint for new accounts.
+    const d = (j.description || '').toLowerCase();
+    if (d.includes('choose a pin')) {
+      const hint = el('loginHint');
+      if (hint) { hint.textContent = 'First login — type the PIN you want (4+ digits) and sign in again.'; hint.style.display = 'block'; }
+      toast('Choose a PIN (4+ digits)', 'red');
+    } else {
+      toast('Wrong username or PIN', 'red');
+    }
     el('loginPin').value = '';
     return;
   }
   const j = await r.json();
+  const wasFirstLogin = !!j.first_login;
   _auth.user = j.user;
   el('loginPin').value = '';
+  el('loginHint').style.display = 'none';
   el('loginOverlay').style.display = 'none';
   toast(wasFirstLogin ? `PIN set — welcome, ${j.user.username}` : `Signed in as ${j.user.username}`, 'green');
 }
@@ -5370,8 +5358,34 @@ async function renderAdminTab() {
     <h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:20px;">Adjustment Report (30 days)</h3>
     <div id="adminReport">loading…</div>
     <h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:20px;">Recent Activity</h3>
-    <div id="adminAudit" style="font-size:11px;font-family:monospace;max-height:300px;overflow:auto;">loading…</div>`;
+    <div id="adminAudit" style="font-size:11px;font-family:monospace;max-height:300px;overflow:auto;">loading…</div>
+    <hr style="margin:22px 0;border:none;border-top:1px solid var(--rule);">
+    <details style="font-size:12px;">
+      <summary style="cursor:pointer;color:var(--muted);">Advanced</summary>
+      <div style="margin-top:10px;padding:10px;border:1px solid var(--rule);border-radius:4px;">
+        <strong style="font-size:12px;">Exit Business Mode</strong>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0 8px;">
+          Returns to Home Mode (no logins — anyone can edit). Deletes all user
+          accounts. Your inventory data is <strong>not</strong> affected. Use this
+          for setup/dev or before re-provisioning.
+        </div>
+        <button class="secondary" onclick="adminDisableBusiness()" style="color:#c0392b;border-color:#c0392b;">Exit Business Mode</button>
+      </div>
+    </details>`;
   adminLoadUsers(); adminLoadBackup(); adminLoadReport(); adminLoadAudit();
+}
+
+async function adminDisableBusiness() {
+  if (!confirm('Exit Business Mode?\n\nThis deletes ALL user accounts and returns to Home Mode (no logins). Your inventory data is kept. You can re-enable Business Mode later.')) return;
+  if (!confirm('Are you sure? All logins/PINs will be removed.')) return;
+  const r = await fetch('/api/auth/disable-business', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true }) });
+  if (!r.ok) { toast('Failed to exit Business Mode', 'red'); return; }
+  _auth.business_mode = false; _auth.user = null; _auth.guest = false;
+  toast('Business Mode disabled — now in Home Mode', 'green');
+  authGateUI();
+  renderAdminTab();
 }
 
 async function adminLoadBackup() {
@@ -5393,12 +5407,12 @@ async function adminLoadBackup() {
     <div style="font-size:12px;margin-bottom:8px;">${driveLine}</div>
     <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;">
       <label>Keep last
-        <input type="number" id="bkRetention" value="${settings.retention ?? 10}" min="1" max="100" style="width:56px;"> backups
+        <input type="number" id="bkRetention" value="${settings.retention ?? 10}" min="1" max="100" style="width:56px;" onchange="adminSaveBackupSettings()"> backups
       </label>
       <label style="margin-left:12px;">Auto-backup every
-        <input type="number" id="bkAutoHours" value="${settings.auto_hours ?? 0}" min="0" max="168" style="width:56px;"> hours (0 = off)
+        <input type="number" id="bkAutoHours" value="${settings.auto_hours ?? 0}" min="0" max="168" style="width:56px;" onchange="adminSaveBackupSettings()"> hours (0 = off)
       </label>
-      <button class="secondary" onclick="adminSaveBackupSettings()" style="white-space:nowrap;">Save settings</button>
+      <span id="bkSettingsMsg" style="color:var(--muted);font-size:11px;"></span>
     </div>
     <div style="margin-top:10px;">
       <button class="green" onclick="adminBackupNow()">Back up now to USB</button>
@@ -5409,10 +5423,15 @@ async function adminLoadBackup() {
 async function adminSaveBackupSettings() {
   const retention = parseInt(el('bkRetention').value, 10) || 10;
   const auto_hours = parseInt(el('bkAutoHours').value, 10) || 0;
+  const msg = el('bkSettingsMsg');
   const r = await fetch('/api/system/backup-settings', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ retention, auto_hours }) });
-  toast(r.ok ? 'Backup settings saved' : 'Save failed', r.ok ? 'green' : 'red');
+  if (msg) {
+    msg.style.color = r.ok ? '#1a5d1a' : '#c0392b';
+    msg.textContent = r.ok ? '✓ saved' : '✗ failed';
+    setTimeout(() => { if (msg) msg.textContent = ''; }, 2000);
+  }
 }
 
 async function adminBackupNow() {
@@ -5569,7 +5588,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.6.0';
+const FRONTEND_BUILD = '2.6.1';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

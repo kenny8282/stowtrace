@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.6.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.6.1"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -567,7 +567,8 @@ def _audit(action, item_id=None, detail=None, user=None):
 #   owner    = manager + user management + audit log + reset.
 # First match wins, so specific rules precede the broad catch-alls.
 _GATE_RULES = [
-    ("POST",   "/api/auth/",          None),      # auth endpoints handle themselves
+    ("POST",   "/api/auth/disable-business", "owner"),  # must precede the auth catch-all
+    ("POST",   "/api/auth/",          None),      # other auth endpoints handle themselves
     ("GET",    "/api/audit",          "owner"),   # audit log = owner only
     ("POST",   "/api/system/backup-now", None),   # emergency USB backup from login screen (no data exposed)
     ("POST",   "/api/system/backup-settings", "owner"),
@@ -642,7 +643,31 @@ def auth_setup():
     return _login_response(username)
 
 
-def _login_response(username):
+@app.route("/api/auth/disable-business", methods=["POST"])
+def auth_disable_business():
+    """Owner turns Business Mode OFF, returning to Home Mode (no logins).
+    Deletes all user accounts. Inventory data is untouched. Owner-only, and
+    the caller must confirm. Intended for the owner/installer, not staff."""
+    if not _business_mode():
+        return jsonify({"ok": True, "already": True})
+    u = _current_user()
+    if not u or u["role"] != "owner":
+        abort(403, description="owner only")
+    body = request.get_json(silent=True) or {}
+    if not body.get("confirm"):
+        abort(400, description="confirmation required")
+    # Wipe users + sessions -> business mode off. Inventory data stays.
+    _db().execute("DELETE FROM sessions")
+    _db().execute("DELETE FROM users")
+    _db().commit()
+    _audit("business_mode_disabled", detail=f"by {u['username']}",
+           user={"username": u["username"], "role": "owner"})
+    resp = jsonify({"ok": True})
+    resp.set_cookie("st_session", "", max_age=0)
+    return resp
+
+
+def _login_response(username, first_login=False):
     import time as _t
     import secrets as _s
     row = _db().execute("SELECT id, username, role FROM users WHERE username=? AND active=1",
@@ -650,7 +675,8 @@ def _login_response(username):
     tok = _s.token_urlsafe(32)
     _db().execute("INSERT INTO sessions(token, user_id, created, expires) VALUES(?,?,?,?)",
                   (tok, row["id"], _now_iso(), _t.time() + SESSION_TTL_S))
-    resp = jsonify({"ok": True, "user": {"username": row["username"], "role": row["role"]}})
+    resp = jsonify({"ok": True, "first_login": bool(first_login),
+                    "user": {"username": row["username"], "role": row["role"]}})
     resp.set_cookie("st_session", tok, max_age=SESSION_TTL_S,
                     httponly=True, samesite="Lax")
     return resp
@@ -675,7 +701,7 @@ def auth_login():
         _db().commit()
         _audit("pin_set_first_login", detail=username,
                user={"username": username, "role": None})
-        return _login_response(username)
+        return _login_response(username, first_login=True)
 
     if not row or row["pin_hash"] != _pin_hash(pin):
         _audit("login_failed", detail=username,
