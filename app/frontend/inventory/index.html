@@ -1235,7 +1235,6 @@
   <!-- TABS -->
   <div class="tabs" id="tabs">
     <button class="tab active" data-tab="scan">⛬ Scan</button>
-    <button class="tab" data-tab="bins">Bins</button>
     <button class="tab" data-tab="categories">Categories</button>
     <button class="tab" data-tab="locations">Locations</button>
     <button class="tab" data-tab="unassigned">Unassigned <span id="unassignedBadge" class="tab-badge"></span></button>
@@ -1323,23 +1322,14 @@
 
   <!-- CONTAINERS TAB -->
   <!-- BINS TAB -->
-  <div class="tab-content hidden" id="tab-bins">
-    <div class="panel">
-      <h2>Bins <span style="color:var(--muted);font-weight:500;font-size:10px;float:right;" id="binCount">0</span></h2>
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <input type="text" id="binSearch" placeholder="Search bins or their contents…" style="flex:1;">
-        <button onclick="openAddBinModal()" class="green" style="flex:0;white-space:nowrap;">+ Add Bin</button>
-      </div>
-      <div class="item-list" id="binList"></div>
-    </div>
-  </div>
+  <!-- (Bins tab removed in v2.9.0 — merged into hierarchical Locations) -->
 
   <!-- UNASSIGNED TAB -->
   <div class="tab-content hidden" id="tab-unassigned">
     <div class="panel">
-      <h2>Unassigned Containers <span style="color:var(--muted);font-weight:500;font-size:10px;float:right;" id="unassignedCount">0</span></h2>
+      <h2>Unassigned <span style="color:var(--muted);font-weight:500;font-size:10px;float:right;" id="unassignedCount">0</span></h2>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
-        Containers without a bin. Tap one to file it.
+        Items and location labels that haven't been placed yet. Tap one to file it into a location.
       </div>
       <input type="text" id="unassignedSearch" placeholder="Search unassigned…" style="margin-bottom:10px;">
       <div class="item-list" id="unassignedList"></div>
@@ -1545,6 +1535,19 @@
     <div class="btn-row" style="margin-top:14px;">
       <button class="green" id="locPickerSelectBtn" onclick="locPickerSelect()" disabled>Use This Location</button>
       <button class="secondary" onclick="locPickerClose()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ITEM → LOCATION PICKER (v2.9.0) — file an item into the location tree -->
+<div class="modal-bg" id="itemLocPickerModal" style="z-index:320;">
+  <div class="modal">
+    <button class="close-x" onclick="closeItemLocPicker()">×</button>
+    <h2>File Into Location</h2>
+    <div class="cat-breadcrumb" id="itemLocPickerCrumb"></div>
+    <div id="itemLocPickerList" class="cat-tree-list" style="margin-top:8px;"></div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="secondary" onclick="closeItemLocPicker()">Cancel</button>
     </div>
   </div>
 </div>
@@ -2216,8 +2219,14 @@ function renderItemDetail(rec) {
     <div class="detail-card">
       <div class="detail-desc">${escapeHtml(primaryText)}</div>
       <div class="detail-type ${typeBadge}">${typeLabel}</div>
-      <div class="detail-id" style="margin-top:8px;">ID: ${rec.id}</div>
   `;
+  // Items are identified by SKU/part number (no QR). Locations (bins) keep their
+  // scannable ID shown, since their QR label is what gets printed and scanned.
+  if (type === 'bin') {
+    html += `<div class="detail-id" style="margin-top:8px;">Location code: ${rec.id}</div>`;
+  } else if (rec.supplier_sku) {
+    html += `<div class="detail-id" style="margin-top:8px;">SKU: ${escapeHtml(rec.supplier_sku)}</div>`;
+  }
 
   if (type === 'bin') {
     if (rec.location_id && _loc.tree[rec.location_id]) {
@@ -2279,17 +2288,18 @@ function renderItemDetail(rec) {
       ].filter(p => p && p.trim());
       const locPath = locParts.length ? locParts.join(' · ') : (rec.bin_location || '');
 
-      // Parent: for containers it's always a bin; single items may live in a container
-      const parentLabel = (type === 'item' && rec.parent_type === 'container') ? 'Container' : 'Bin';
-      html += `<div class="detail-field"><span class="k">${parentLabel}</span>
+      // Parent is a location (bins/containers unified into locations in v2.9.0).
+      html += `<div class="detail-field"><span class="k">Location</span>
         <span style="color:var(--accent);font-weight:700;cursor:pointer;" onclick="showItemDetail('${rec.bin_id}')">${escapeHtml(binName)}</span>
+        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();openLocationPickerForItem('${rec.id}')">Move</button>` : ''}
       </div>`;
-      // Location: separate labeled row underneath
       if (locPath) {
-        html += `<div class="detail-field"><span class="k">Location</span> ${escapeHtml(locPath)}</div>`;
+        html += `<div class="detail-field"><span class="k">Path</span> ${escapeHtml(locPath)}</div>`;
       }
     } else {
-      html += `<div class="detail-field" style="color:var(--accent);"><span class="k">Stored in</span> Not assigned</div>`;
+      html += `<div class="detail-field" style="color:var(--accent);"><span class="k">Location</span> Not assigned
+        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();openLocationPickerForItem('${rec.id}')">File here</button>` : ''}
+      </div>`;
     }
     // Quantity stepper row + action button (Buy URL or Google Search).
     // The stepper lets staff adjust qty inline without opening edit details.
@@ -4757,41 +4767,39 @@ function renderLists() {
   const containers = state.items.filter(i => i.type === 'container' || i.type === 'item');
   const bins = state.items.filter(i => i.type === 'bin');
 
-  el('binCount').textContent = bins.length;
-
-  const bq = (el('binSearch')?.value || '').toLowerCase();
-
-  // Filter bins by name, location parts, OR contained container names/notes
-  const filteredBins = !bq ? bins : bins.filter(b => {
-    if (friendlyName(b).toLowerCase().includes(bq)) return true;
-    if ((b.location || '').toLowerCase().includes(bq)) return true;
-    if ((b.location_property || '').toLowerCase().includes(bq)) return true;
-    if ((b.location_room || '').toLowerCase().includes(bq)) return true;
-    if ((b.location_spot || '').toLowerCase().includes(bq)) return true;
-    // Match if any container inside the bin contains the query
-    const contents = containers.filter(c => c.bin_id === b.id);
-    return contents.some(c =>
-      friendlyName(c).toLowerCase().includes(bq) ||
-      (c.notes || '').toLowerCase().includes(bq) ||
-      (c.category || '').toLowerCase().includes(bq)
-    );
-  });
-
-  // Render bin list
-  el('binList').innerHTML = filteredBins.length === 0
-    ? `<div class="empty-state">${bq ? 'No bins match.' : 'No bins yet. Scan a bin\'s QR or tap + Add Bin.'}</div>`
-    : filteredBins.map(i => {
-        const ct = containers.filter(c => c.bin_id === i.id).length;
-        const locPath = formatLocationPath(i);
-        return `<div class="item-row" onclick="showItemDetail('${i.id}')">
-          <div class="ititle">
-            ${escapeHtml(friendlyName(i))}
-            ${locPath ? `<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px;">${escapeHtml(locPath)}</div>` : ''}
-          </div>
-          <div class="imeta">${ct} item${ct === 1 ? '' : 's'}</div>
-          <div class="iid">${i.id}</div>
-        </div>`;
-      }).join('');
+  // Bins tab was removed (merged into Locations). Only render the bin list if
+  // its container still exists, so the shared renderLists() stays safe.
+  if (el('binList')) {
+    el('binCount').textContent = bins.length;
+    const bq = (el('binSearch')?.value || '').toLowerCase();
+    const filteredBins = !bq ? bins : bins.filter(b => {
+      if (friendlyName(b).toLowerCase().includes(bq)) return true;
+      if ((b.location || '').toLowerCase().includes(bq)) return true;
+      if ((b.location_property || '').toLowerCase().includes(bq)) return true;
+      if ((b.location_room || '').toLowerCase().includes(bq)) return true;
+      if ((b.location_spot || '').toLowerCase().includes(bq)) return true;
+      const contents = containers.filter(c => c.bin_id === b.id);
+      return contents.some(c =>
+        friendlyName(c).toLowerCase().includes(bq) ||
+        (c.notes || '').toLowerCase().includes(bq) ||
+        (c.category || '').toLowerCase().includes(bq)
+      );
+    });
+    el('binList').innerHTML = filteredBins.length === 0
+      ? `<div class="empty-state">${bq ? 'No bins match.' : 'No bins yet.'}</div>`
+      : filteredBins.map(i => {
+          const ct = containers.filter(c => c.bin_id === i.id).length;
+          const locPath = formatLocationPath(i);
+          return `<div class="item-row" onclick="showItemDetail('${i.id}')">
+            <div class="ititle">
+              ${escapeHtml(friendlyName(i))}
+              ${locPath ? `<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px;">${escapeHtml(locPath)}</div>` : ''}
+            </div>
+            <div class="imeta">${ct} item${ct === 1 ? '' : 's'}</div>
+            <div class="iid">${i.id}</div>
+          </div>`;
+        }).join('');
+  }
 
   // ---- Unassigned containers & items ----
   // ONLY proper containers/items with no parent (or pointing to a missing
@@ -4842,8 +4850,8 @@ function renderLists() {
 
 /* Tapping an unassigned container opens the camera to pick a bin for it. */
 function fileContainerFromList(containerId) {
-  state.pendingBinSelection = containerId;
-  openBinScanModal();
+  // v2.9.0: file via the navigable location hierarchy instead of scanning a bin.
+  openLocationPickerForItem(containerId);
 }
 
 /* Format the hierarchical location of a bin as "Property · Room · Spot",
@@ -5062,6 +5070,36 @@ async function locLoad() {
   } catch (e) { _loc.tree = {}; _loc.counts = {}; _loc.loaded = true; }
 }
 
+// --- Bin-based location hierarchy (v2.9.0) --------------------------------
+// Locations ARE bins (type='bin'). They nest via parent_bin_id. Items
+// (type='item') are filed into a location via their bin_id. "Container" and
+// "bin" have collapsed into a single concept: a location.
+function locBins() {
+  return state.items.filter(i => i.type === 'bin');
+}
+function binChildren(parentId) {
+  // parentId null/undefined = top-level locations (roots).
+  return locBins()
+    .filter(b => (b.parent_bin_id || null) === (parentId || null))
+    .sort((a, b) => friendlyName(a).localeCompare(friendlyName(b)));
+}
+function binPath(id) {
+  const path = []; let cur = id; const seen = new Set();
+  const byId = {}; locBins().forEach(b => byId[b.id] = b);
+  while (cur && !seen.has(cur)) { seen.add(cur); const n = byId[cur]; if (!n) break; path.unshift(n); cur = n.parent_bin_id || null; }
+  return path;
+}
+// Count items filed directly at this location.
+function binDirectItemCount(binId) {
+  return state.items.filter(i => (i.type === 'item' || i.type === 'container') && i.bin_id === binId).length;
+}
+// Count items rolled up through sub-locations too.
+function binRollupItemCount(binId) {
+  let t = binDirectItemCount(binId);
+  for (const child of binChildren(binId)) t += binRollupItemCount(child.id);
+  return t;
+}
+
 function locChildren(pid) {
   const out = [];
   for (const k in _loc.tree) if (_loc.tree[k].parent_id === (pid || null)) out.push(_loc.tree[k]);
@@ -5086,90 +5124,237 @@ function locRollup(id) {
 }
 
 async function renderLocationsTab() {
-  if (!_loc.loaded) await locLoad();
+  if (!state.items || !state.items.length) await refreshItems();
+  const cur = _loc.currentId;   // now holds a bin id (or null for top level)
+  const byId = {}; locBins().forEach(b => byId[b.id] = b);
+
+  // ---- Breadcrumb ----
   const bc = el('locBreadcrumb'); bc.innerHTML = '';
   const rootCrumb = document.createElement('span');
-  rootCrumb.className = 'crumb' + (_loc.currentId ? '' : ' current');
+  rootCrumb.className = 'crumb' + (cur ? '' : ' current');
   rootCrumb.textContent = '⌂ Locations';
   rootCrumb.addEventListener('click', () => { _loc.currentId = null; renderLocationsTab(); });
   bc.appendChild(rootCrumb);
-  locPath(_loc.currentId).forEach((n, idx, arr) => {
+  binPath(cur).forEach((n, idx, arr) => {
     const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '›'; bc.appendChild(sep);
     const c = document.createElement('span');
     c.className = 'crumb' + (idx === arr.length - 1 ? ' current' : '');
-    c.textContent = n.name;
+    c.textContent = friendlyName(n);
     if (idx !== arr.length - 1) c.addEventListener('click', () => { _loc.currentId = n.id; renderLocationsTab(); });
     bc.appendChild(c);
   });
 
-  el('locEditBtn').style.display = _loc.currentId ? '' : 'none';
+  el('locEditBtn').style.display = cur ? '' : 'none';
   const list = el('locChildrenList'); list.innerHTML = '';
   const binList = el('locBinList'); binList.innerHTML = '';
-  const children = locChildren(_loc.currentId);
-  el('locEmptyState').style.display =
-    (!_loc.currentId && children.length === 0) ? '' : 'none';
 
+  const children = binChildren(cur);
+  el('locEmptyState').style.display = (!cur && children.length === 0) ? '' : 'none';
+
+  // ---- Sub-locations (drill down) ----
   children.forEach(c => {
-    const count = locRollup(c.id);
+    const rolled = binRollupItemCount(c.id);
+    const kids = binChildren(c.id).length;
     const node = document.createElement('div');
     node.className = 'cat-tree-node';
-    node.innerHTML = `<div class="cat-name">${escapeHtml(c.name)}</div>
-      <div class="cat-meta">${count ? count + ' bin' + (count === 1 ? '' : 's') : ''}</div>
+    const metaBits = [];
+    if (kids) metaBits.push(kids + ' sub-location' + (kids === 1 ? '' : 's'));
+    if (rolled) metaBits.push(rolled + ' item' + (rolled === 1 ? '' : 's'));
+    node.innerHTML = `<div class="cat-name">${escapeHtml(friendlyName(c))}</div>
+      <div class="cat-meta">${metaBits.join(' · ')}</div>
       <div class="cat-chevron">›</div>`;
     node.addEventListener('click', () => { _loc.currentId = c.id; renderLocationsTab(); });
     list.appendChild(node);
   });
 
-  // Bins assigned to this exact node
-  if (_loc.currentId) {
-    const bins = state.items.filter(i => i.type === 'bin' && i.location_id === _loc.currentId);
-    bins.forEach(b => {
-      const div = document.createElement('div');
-      div.className = 'item-row';
-      div.addEventListener('click', () => showItemDetail(b.id));
-      div.innerHTML = `<div class="ititle">${escapeHtml(friendlyName(b))}</div>
-        <div class="ibadge bin">BIN</div><div class="iid">${b.id}</div>`;
-      binList.appendChild(div);
-    });
-    if (!bins.length && !children.length) {
-      binList.innerHTML = '<div class="empty-state">No bins here yet — assign one from its Edit form.</div>';
+  // ---- Items filed directly at the current location ----
+  if (cur) {
+    const items = state.items.filter(i =>
+      (i.type === 'item' || i.type === 'container') && i.bin_id === cur);
+    if (items.length) {
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size:11px;text-transform:uppercase;color:var(--muted);margin:12px 0 6px;letter-spacing:0.05em;';
+      header.textContent = `Items here (${items.length})`;
+      binList.appendChild(header);
+      items.sort((a, b) => friendlyName(a).localeCompare(friendlyName(b)));
+      items.forEach(it => {
+        const div = document.createElement('div');
+        div.className = 'item-row';
+        div.addEventListener('click', () => showItemDetail(it.id));
+        const sku = it.supplier_sku ? `<div style="font-size:11px;color:var(--muted);font-weight:400;">${escapeHtml(it.supplier_sku)}</div>` : '';
+        div.innerHTML = `<div class="ititle">${escapeHtml(friendlyName(it))}${sku}</div>
+          <div class="imeta">Qty ${it.quantity ?? 0}</div>`;
+        binList.appendChild(div);
+      });
+    } else if (!children.length) {
+      binList.innerHTML = '<div class="empty-state">Nothing filed here yet. Add a sub-location, or file items here from an item\'s detail.</div>';
     }
+  }
+}
+
+// --- Stage 3: creating a location queues its label into Label Forge ---------
+// A location's QR encodes its id (like WN5H2). We append a row to the shared
+// Label Forge maker queue (st:maker_rows) so staff can print the label. This is
+// why locations get QR codes and items don't.
+async function queueLocationLabel(binId, name) {
+  try {
+    const raw = await fetch('/api/kv/st:maker_rows', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+    let rows = [];
+    if (raw && raw.value) { try { rows = JSON.parse(raw.value) || []; } catch (e) { rows = []; } }
+    // Avoid duplicating a label already queued for this location.
+    if (rows.some(r => r && r.id === binId)) return;
+    const uid = 'u' + Math.random().toString(36).slice(2, 10);
+    rows.push({
+      uid, id: binId,
+      line1: name || 'Location',
+      line2: '', line3: '',
+      qr: true, copies: 1,
+      w: 62, h: 29,               // default label size; staff can adjust in Forge
+      color: 'white-black',
+      formatName: 'location',
+      isReprint: false,
+    });
+    await fetch('/api/kv/st:maker_rows', { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: JSON.stringify(rows) }) });
+    toast('Label queued in Label Forge', 'gray');
+  } catch (e) {
+    // Non-fatal — the location still exists; label can be printed manually.
+  }
+}
+
+// --- File an item into a location (navigable hierarchy picker) --------------
+const _itemLocPicker = { itemId: null, browseId: null };
+function openLocationPickerForItem(itemId) {
+  _itemLocPicker.itemId = itemId;
+  _itemLocPicker.browseId = null;   // start at top of the location tree
+  renderItemLocPicker();
+  el('itemLocPickerModal').classList.add('open');
+}
+function closeItemLocPicker() {
+  el('itemLocPickerModal').classList.remove('open');
+  _itemLocPicker.itemId = null;
+}
+function renderItemLocPicker() {
+  const browseId = _itemLocPicker.browseId;
+  const byId = {}; locBins().forEach(b => byId[b.id] = b);
+  // Breadcrumb
+  const bc = el('itemLocPickerCrumb'); bc.innerHTML = '';
+  const root = document.createElement('span');
+  root.className = 'crumb' + (browseId ? '' : ' current');
+  root.textContent = '⌂ All locations';
+  root.style.cursor = 'pointer';
+  root.addEventListener('click', () => { _itemLocPicker.browseId = null; renderItemLocPicker(); });
+  bc.appendChild(root);
+  binPath(browseId).forEach((n, idx, arr) => {
+    const sep = document.createElement('span'); sep.textContent = ' › '; bc.appendChild(sep);
+    const c = document.createElement('span');
+    c.className = 'crumb' + (idx === arr.length - 1 ? ' current' : '');
+    c.textContent = friendlyName(n); c.style.cursor = 'pointer';
+    c.addEventListener('click', () => { _itemLocPicker.browseId = n.id; renderItemLocPicker(); });
+    bc.appendChild(c);
+  });
+  // List: children of the current browse node
+  const list = el('itemLocPickerList'); list.innerHTML = '';
+  const children = binChildren(browseId);
+  if (browseId) {
+    // "File here" button for the current location
+    const fileBtn = document.createElement('button');
+    fileBtn.className = 'green';
+    fileBtn.style.cssText = 'width:100%;margin-bottom:10px;';
+    fileBtn.textContent = 'File item into "' + friendlyName(byId[browseId]) + '"';
+    fileBtn.addEventListener('click', () => fileItemIntoLocation(_itemLocPicker.itemId, browseId));
+    list.appendChild(fileBtn);
+  }
+  if (!children.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = browseId ? 'No sub-locations. File here, or drill elsewhere.' : 'No locations yet.';
+    list.appendChild(empty);
+  }
+  children.forEach(c => {
+    const kids = binChildren(c.id).length;
+    const node = document.createElement('div');
+    node.className = 'cat-tree-node';
+    node.innerHTML = `<div class="cat-name">${escapeHtml(friendlyName(c))}</div>
+      <div class="cat-meta">${kids ? kids + ' sub' : ''}</div>
+      <div class="cat-chevron">›</div>`;
+    node.addEventListener('click', () => { _itemLocPicker.browseId = c.id; renderItemLocPicker(); });
+    list.appendChild(node);
+  });
+}
+async function fileItemIntoLocation(itemId, locationId) {
+  const rec = await saveItem(itemId, { bin_id: locationId });
+  if (rec) {
+    toast('Filed', 'green');
+    closeItemLocPicker();
+    await refreshItems();
+    showItemDetail(itemId);
   }
 }
 
 function locOpenAdd() {
-  const name = (prompt('New location name' + (_loc.currentId ? ` inside "${_loc.tree[_loc.currentId]?.name}"` : ' (top level)') + ':') || '').trim();
+  const parentId = _loc.currentId || null;
+  const parentName = parentId ? friendlyName(locBins().find(b => b.id === parentId) || {}) : null;
+  const name = (prompt('New location name' + (parentName ? ` inside "${parentName}"` : ' (top level)') + ':\n(a shelf, wall spot, bin, display case, section — any name)') || '').trim();
   if (!name) return;
-  fetch('/api/loctree', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, parent_id: _loc.currentId || null }) })
-    .then(r => r.json()).then(async j => {
-      if (j.ok) { toast('Location added', 'green'); await locLoad(); renderLocationsTab(); }
-      else toast('Failed', 'red');
+  // A location is a bin. Create it via the items API, nested under the current one.
+  createLocationBin(name, parentId);
+}
+
+async function createLocationBin(name, parentId) {
+  try {
+    // Mint a fresh id, then create the location as a bin record.
+    const idResp = await fetch('/api/items/new-id', { method: 'POST' }).then(r => r.json()).catch(() => null);
+    if (!idResp || !idResp.id) { toast('Could not create location', 'red'); return; }
+    const newId = idResp.id;
+    const rec = await saveItem(newId, {
+      type: 'bin',
+      description: name,
+      lines: [name],
+      parent_bin_id: parentId || null,
     });
+    if (!rec) return;   // saveItem already toasted
+    toast('Location added', 'green');
+    await refreshItems();
+    renderLocationsTab();
+    // Stage 3: queue this location's label into Label Forge to be printed.
+    queueLocationLabel(newId, name);
+  } catch (e) {
+    toast('Error adding location: ' + e.message, 'red');
+  }
 }
 
 async function locOpenEdit() {
   const id = _loc.currentId; if (!id) return;
-  const node = _loc.tree[id];
-  const action = prompt(`Location "${node.name}" — type a new name to rename, or type DELETE to remove:`, node.name);
+  const bin = locBins().find(b => b.id === id);
+  if (!bin) return;
+  const curName = friendlyName(bin);
+  const action = prompt(`Location "${curName}" — type a new name to rename, or type DELETE to remove:`, curName);
   if (action === null) return;
   if (action.trim().toUpperCase() === 'DELETE') {
     if (!canManage()) { toast('Only managers and owners can delete locations', 'red'); return; }
-    const children = locChildren(id);
-    let url = '/api/loctree/' + id;
-    if (children.length) {
-      if (confirm(`${children.length} sub-location(s). OK = delete them too, Cancel = move them up.`)) url += '?cascade=true';
-      else url += '?promote_children=true';
+    // Guard: don't orphan items or sub-locations silently.
+    const kids = binChildren(id).length;
+    const items = binDirectItemCount(id);
+    if (kids || items) {
+      if (!confirm(`This location has ${kids} sub-location(s) and ${items} item(s) filed directly here.\n\nDeleting it will leave those unassigned. Continue?`)) return;
     }
-    const r = await fetch(url, { method: 'DELETE' });
-    if (r.ok) { _loc.currentId = node.parent_id; await locLoad(); renderLocationsTab(); toast('Deleted', 'green'); }
+    const r = await fetch('/api/items/' + id, { method: 'DELETE' });
+    if (r.ok) {
+      _loc.currentId = bin.parent_bin_id || null;
+      await refreshItems(); renderLocationsTab(); toast('Location deleted', 'green');
+    } else { toast('Delete failed', 'red'); }
     return;
   }
   const name = action.trim();
-  if (name && name !== node.name) {
-    await fetch('/api/loctree/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }) });
-    await locLoad(); renderLocationsTab();
+  if (name && name !== curName) {
+    const r = await fetch('/api/items/' + id, { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: name }) });
+    if (r.ok) { await refreshItems(); renderLocationsTab(); toast('Renamed', 'green'); }
+    else toast('Rename failed', 'red');
   }
 }
 
@@ -5701,7 +5886,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.8.0';
+const FRONTEND_BUILD = '2.9.0';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

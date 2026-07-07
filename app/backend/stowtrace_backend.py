@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.8.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -521,6 +521,79 @@ def _auth_init():
     except Exception:
         pass
     d.commit()
+
+    # --- Location restructure migration (v2.9.0) -------------------------------
+    # Stage 1: items no longer carry scannable QR codes (identified by SKU/part
+    # number instead); only locations (formerly "bins"/"containers") get QR
+    # labels. Bins become a custom hierarchy via parent_bin_id. This migration is
+    # idempotent — it only acts on records that haven't been migrated yet.
+    try:
+        _migrate_location_restructure(d)
+    except Exception as e:
+        app.logger.warning(f"location restructure migration skipped: {e}")
+
+
+def _migrate_location_restructure(d):
+    """Idempotent Stage 1 migration. Safe to run repeatedly.
+
+    Only marks itself complete once real data is present — so if the app starts
+    with an empty database and data is restored afterward, the migration still
+    runs on that data at the next startup instead of being skipped."""
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    if isinstance(cfg, dict) and cfg.get("_locrestruct_v1"):
+        return  # already migrated
+
+    # If the database has no items yet, don't mark complete — there's nothing to
+    # migrate, and data may be restored later.
+    item_count = d.execute("SELECT COUNT(*) c FROM items").fetchone()["c"]
+    if item_count == 0:
+        return
+
+    changed = False
+    # 1. Strip QR from items: mark type='item'/'container' records as no_qr.
+    for row in d.execute("SELECT id, data FROM items WHERE type IN ('item','container')").fetchall():
+        try:
+            it = json.loads(row["data"])
+        except Exception:
+            continue
+        if not it.get("no_qr"):
+            it["no_qr"] = True
+            d.execute("UPDATE items SET data=? WHERE id=?", (json.dumps(it), row["id"]))
+            changed = True
+
+    # 2. Ensure every location (type='bin') has a parent_bin_id key (None = root).
+    for row in d.execute("SELECT id, data FROM items WHERE type='bin'").fetchall():
+        try:
+            b = json.loads(row["data"])
+        except Exception:
+            continue
+        node_changed = False
+        if "parent_bin_id" not in b:
+            b["parent_bin_id"] = None
+            node_changed = True
+        # Rename the default import root to the friendlier "AZ Turn and Burn"
+        # (only if it still carries the auto-generated import name — respects any
+        # name the operator already chose).
+        if b.get("description") in ("AZ T&B — Imported Catalog", "AZ T&B - Imported Catalog"):
+            b["description"] = "AZ Turn and Burn"
+            b["location_property"] = "AZ Turn and Burn"
+            node_changed = True
+        if node_changed:
+            d.execute("UPDATE items SET data=? WHERE id=?", (json.dumps(b), row["id"]))
+            changed = True
+
+    d.commit()
+
+    # 3. Mark migration complete in config (only reached when data existed).
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["_locrestruct_v1"] = True
+    _write_file("st:config", json.dumps(cfg))
+    if changed:
+        app.logger.info("location restructure migration applied")
 
 
 def _pin_hash(pin):

@@ -3,6 +3,37 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.0 — Location restructure: SKU items, one hierarchical location tree
+
+A significant restructure of how items and locations work. **Your existing AZ
+Turn and Burn catalog is fully preserved** — this was verified against a real
+4,056-item / 3,823-photo backup before release.
+
+**Items are identified by SKU / part number, not QR codes**
+- Individual items no longer carry scannable QR codes. Item detail shows the SKU;
+  the internal ID is no longer surfaced as a QR. All item data (SKU, category,
+  attributes, photos, quantity, price, notes) is kept exactly as-is.
+
+**One custom location hierarchy (bins + containers collapsed into "locations")**
+- The separate Bins tab is gone. Everything physical — a shelf, a wall spot, a
+  hanging peg, a display case, a bin, a section, any name — is now just a
+  "location" in a single tree you build as needed.
+- Locations nest to any depth: e.g. AZ Turn and Burn → East Wall → Shelf 3.
+- The existing store root was renamed to "AZ Turn and Burn" (editable), and all
+  imported items sit under it, ready to be organized into sub-locations.
+
+**Only locations get QR labels**
+- Creating a location queues its label into Label Forge to be printed. The QR on a
+  location is what gets scanned. (Items go by SKU.)
+
+**Filing items**
+- Item detail has a Move / File button that opens a navigable location picker, so
+  you can file an item anywhere in the hierarchy. The Unassigned tab uses the same
+  picker.
+
+**Migration** runs automatically and safely on first startup after upgrade, and is
+idempotent. Delete actions on locations remain manager+.
+
 ## 2.8.0 — Auto-backup scheduler + delete gating
 
 - **Scheduled auto-backup now runs.** A systemd timer polls hourly; when the
