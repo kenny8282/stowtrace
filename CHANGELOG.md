@@ -3,6 +3,31 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.6.0 — USB backups, founder protection, login-screen backup
+
+**USB backup system**
+- Backups write to a registered USB drive that carries a `STOWTRACE_BACKUP.txt`
+  marker file, into a `backups/` folder, so the device never writes to a random
+  stick. Files are timestamped.
+- Retention: keep the last N backups (default 10); older ones are pruned.
+- Owner "Backups" panel: drive status, retention setting, auto-backup interval
+  (every N hours; 0 = off), and a manual "Back up now to USB" button.
+
+**Login-screen emergency backup**
+- A small "Back up now to USB" link on the sign-in screen writes a backup with no
+  credentials, so a locked-out customer can protect their data before getting help.
+  It only writes to the physically-present USB drive and exposes no data over the
+  network. Shows success (with filename) or a clear reason if it can't.
+
+**Founder (original owner) protection**
+- The first owner account created when Business Mode is enabled is marked as the
+  protected founder. No other admin can demote, deactivate, delete, or reset it —
+  only device recovery (SSH) can. Shown with a FOUNDER badge and locked controls.
+
+**Full login wall**
+- Business Mode now requires sign-in for the whole app (the read-only guest bypass
+  was removed).
+
 ## 2.5.0 — Business Mode user management (Stage 1)
 
 Adds a full role-based user system for shipped store boxes. Defaults to Home

@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.5.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.6.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -513,6 +513,11 @@ def _auth_init():
         cols = [r[1] for r in d.execute("PRAGMA table_info(users)").fetchall()]
         if "pin_set" not in cols:
             d.execute("ALTER TABLE users ADD COLUMN pin_set INTEGER NOT NULL DEFAULT 1")
+        if "protected" not in cols:
+            # The original owner (Business Mode creator) is protected: no other
+            # account can demote, deactivate, delete, or reset it. Only recovery
+            # (SSH owner-reset) can touch it. This is the master account.
+            d.execute("ALTER TABLE users ADD COLUMN protected INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass
     d.commit()
@@ -564,6 +569,8 @@ def _audit(action, item_id=None, detail=None, user=None):
 _GATE_RULES = [
     ("POST",   "/api/auth/",          None),      # auth endpoints handle themselves
     ("GET",    "/api/audit",          "owner"),   # audit log = owner only
+    ("POST",   "/api/system/backup-now", None),   # emergency USB backup from login screen (no data exposed)
+    ("POST",   "/api/system/backup-settings", "owner"),
     ("GET",    "/api/",               None),      # all other reads open (kiosk)
 
     # --- owner-only ---
@@ -628,7 +635,7 @@ def auth_setup():
     if not username or len(pin) < 4:
         abort(400, description="username and a PIN of 4+ digits required")
     _db().execute(
-        "INSERT INTO users(username, pin_hash, role, active, created, pin_set) VALUES(?,?,?,1,?,1)",
+        "INSERT INTO users(username, pin_hash, role, active, created, pin_set, protected) VALUES(?,?,?,1,?,1,1)",
         (username, _pin_hash(pin), "owner", _now_iso()))
     _audit("business_mode_enabled", detail=f"first owner: {username}",
            user={"username": username, "role": "owner"})
@@ -696,7 +703,7 @@ def users_list():
             # Non-owners get names only (login picker needs them)
             rows = _db().execute("SELECT username FROM users WHERE active=1 ORDER BY username").fetchall()
             return jsonify({"users": [{"username": r["username"]} for r in rows]})
-    rows = _db().execute("SELECT id, username, role, active, created, pin_set FROM users ORDER BY username").fetchall()
+    rows = _db().execute("SELECT id, username, role, active, created, pin_set, protected FROM users ORDER BY username").fetchall()
     # PINs are hashed and never viewable. We report whether a PIN is set so the
     # owner UI can show "set" vs "awaiting first login", and offer reset.
     return jsonify({"users": [dict(r) for r in rows]})
@@ -733,9 +740,18 @@ def users_update(username):
     """Owner updates a user. Supports instant role change and PIN reset.
     Guards the last remaining owner from being demoted or deactivated."""
     body = request.get_json(silent=True) or {}
-    row = _db().execute("SELECT id, role FROM users WHERE username=?", (username,)).fetchone()
+    row = _db().execute("SELECT id, role, protected FROM users WHERE username=?", (username,)).fetchone()
     if not row:
         abort(404)
+
+    # --- founder protection: the original owner is untouchable via the app ---
+    if row["protected"]:
+        if body.get("role") and body["role"] != "owner":
+            abort(400, description="the original owner account cannot be changed")
+        if "active" in body and not body["active"]:
+            abort(400, description="the original owner account cannot be deactivated")
+        if body.get("reset_pin"):
+            abort(400, description="the original owner's PIN can only be reset via device recovery (SSH)")
 
     # --- last-owner protection ---
     if row["role"] == "owner" and _owner_count() <= 1:
@@ -767,9 +783,11 @@ def users_update(username):
 @app.route("/api/users/<username>", methods=["DELETE"])
 def users_delete(username):
     """Delete a user entirely. Refuses to delete the last active owner."""
-    row = _db().execute("SELECT id, role FROM users WHERE username=?", (username,)).fetchone()
+    row = _db().execute("SELECT id, role, protected FROM users WHERE username=?", (username,)).fetchone()
     if not row:
         abort(404)
+    if row["protected"]:
+        abort(400, description="the original owner account cannot be deleted")
     if row["role"] == "owner" and _owner_count() <= 1:
         abort(400, description="cannot delete the last owner")
     _db().execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
@@ -1445,7 +1463,10 @@ def categories_seed():
 # UI whether that destination is available.
 
 BACKUP_DRIVE_PATH = "/mnt/backup"
+BACKUP_SUBDIR = "backups"                    # backups live in <drive>/backups/
+BACKUP_MARKER = "STOWTRACE_BACKUP.txt"       # drive must carry this to be a valid target
 BACKUP_SCHEMA = "stowtrace-backup/v1"
+DEFAULT_BACKUP_RETENTION = 10                # keep this many most-recent backups
 
 # Keys that participate in backup/restore. Order matters only for readability.
 _BACKUP_KEYS = [
@@ -1508,14 +1529,92 @@ def _drive_status():
         st = os.statvfs(p)
         free = st.f_bavail * st.f_frsize
         total = st.f_blocks * st.f_frsize
+        # A valid StowTrace backup drive carries the marker file. This prevents
+        # us from writing onto a random USB stick someone plugged in.
+        marker = (p / BACKUP_MARKER).exists()
+        # Count existing backups in the subfolder.
+        subdir = p / BACKUP_SUBDIR
+        n_backups = 0
+        if subdir.is_dir():
+            n_backups = len([x for x in subdir.glob("*.json")])
         return {
             "mounted": True,
             "path": str(p),
             "free_bytes": free,
             "total_bytes": total,
+            "is_stowtrace_drive": marker,
+            "backup_count": n_backups,
         }
     except Exception as e:
         return {"mounted": False, "reason": f"error: {e}"}
+
+
+def _backup_settings():
+    """Read backup settings (retention, auto interval) from st:config."""
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    bk = cfg.get("backup", {}) if isinstance(cfg, dict) else {}
+    return {
+        "retention": int(bk.get("retention", DEFAULT_BACKUP_RETENTION)),
+        "auto_hours": int(bk.get("auto_hours", 0)),   # 0 = auto-backup off
+    }
+
+
+def _prune_backups(retention):
+    """Keep only the `retention` most-recent backups in the drive subfolder."""
+    subdir = Path(BACKUP_DRIVE_PATH) / BACKUP_SUBDIR
+    if not subdir.is_dir() or retention <= 0:
+        return 0
+    files = sorted(subdir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)
+    removed = 0
+    for old in files[retention:]:
+        try:
+            old.unlink(); removed += 1
+        except Exception:
+            pass
+    return removed
+
+
+def _write_backup_to_drive():
+    """Core backup-to-drive routine, shared by the manual and no-auth paths.
+    Returns (ok, result_dict, http_status)."""
+    from datetime import datetime
+    status = _drive_status()
+    if not status.get("mounted"):
+        return False, {"ok": False, "error": "no_drive",
+                       "detail": f"USB backup drive not mounted at {BACKUP_DRIVE_PATH}",
+                       "drive": status}, 400
+    if not status.get("is_stowtrace_drive"):
+        return False, {"ok": False, "error": "not_stowtrace_drive",
+                       "detail": f"Drive is missing the {BACKUP_MARKER} marker — not a registered StowTrace backup drive",
+                       "drive": status}, 400
+
+    subdir = Path(BACKUP_DRIVE_PATH) / BACKUP_SUBDIR
+    subdir.mkdir(parents=True, exist_ok=True)
+
+    payload = _build_backup_payload()
+    body = json.dumps(payload, indent=2, sort_keys=False)
+    host = payload.get("hostname", "stowtrace")
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    filename = f"{host}-backup-{ts}.json"
+    out = subdir / filename
+
+    tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, dir=str(subdir),
+                                      prefix=filename + ".", suffix=".tmp")
+    try:
+        tmp.write(body); tmp.flush(); os.fsync(tmp.fileno()); tmp.close()
+        os.replace(tmp.name, out)
+    except Exception as e:
+        try: tmp.close(); os.unlink(tmp.name)
+        except Exception: pass
+        return False, {"ok": False, "error": "write_failed", "detail": str(e)}, 500
+
+    # Prune old backups per retention setting.
+    pruned = _prune_backups(_backup_settings()["retention"])
+    return True, {"ok": True, "path": str(out), "size_bytes": len(body),
+                  "filename": filename, "pruned": pruned}, 200
 
 
 @app.route("/api/system/backup", methods=["GET"])
@@ -1542,42 +1641,55 @@ def system_backup_drive_status():
 
 @app.route("/api/system/backup-to-drive", methods=["POST"])
 def system_backup_to_drive():
-    """Write a full-state backup file to the USB drive at /mnt/backup."""
-    from datetime import datetime
-    status = _drive_status()
-    if not status.get("mounted"):
-        return jsonify({"ok": False, "error": "no_drive",
-                        "detail": f"USB backup drive not mounted at {BACKUP_DRIVE_PATH}",
-                        "drive": status}), 400
+    """Write a full-state backup to the USB drive's backups/ folder (manager+)."""
+    ok, result, code = _write_backup_to_drive()
+    if ok:
+        _audit("backup_to_drive", detail={"filename": result.get("filename")})
+    return jsonify(result), code
 
-    payload = _build_backup_payload()
-    body = json.dumps(payload, indent=2, sort_keys=False)
-    host = payload.get("hostname", "inv")
-    ts = datetime.now().strftime("%Y-%m-%d_%H%M")
-    filename = f"{host}-backup-{ts}.json"
-    out = Path(BACKUP_DRIVE_PATH) / filename
 
-    # Write atomically — temp file beside the target then rename.
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", delete=False,
-        dir=str(out.parent),
-        prefix=filename + ".",
-        suffix=".tmp",
-    )
+@app.route("/api/system/backup-now", methods=["POST"])
+def system_backup_now():
+    """NO-AUTH emergency backup to USB, callable from the login screen.
+
+    Rationale: if a customer is locked out (lost/forgot credentials), they can
+    still protect their data with one tap before calling for help. The device
+    is expected to be in a secure location, and this only WRITES a backup to the
+    physically-present USB drive — it exposes/returns no inventory data over the
+    network, so it's safe to leave unauthenticated. It's rate-limited implicitly
+    by the retention prune (won't fill the drive)."""
+    ok, result, code = _write_backup_to_drive()
+    if ok:
+        _audit("backup_now_unauth", detail={"filename": result.get("filename")},
+               user={"username": "(login-screen)", "role": None})
+    return jsonify(result), code
+
+
+@app.route("/api/system/backup-settings", methods=["GET"])
+def system_backup_settings_get():
+    return jsonify(_backup_settings())
+
+
+@app.route("/api/system/backup-settings", methods=["POST"])
+def system_backup_settings_set():
+    """Owner sets retention count + auto-backup interval (hours; 0=off)."""
+    body = request.get_json(silent=True) or {}
     try:
-        tmp.write(body)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp.close()
-        os.replace(tmp.name, out)
-    except Exception as e:
-        try:
-            tmp.close(); os.unlink(tmp.name)
-        except Exception:
-            pass
-        return jsonify({"ok": False, "error": "write_failed", "detail": str(e)}), 500
-
-    return jsonify({"ok": True, "path": str(out), "size_bytes": len(body), "filename": filename})
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    bk = cfg.get("backup", {}) if isinstance(cfg.get("backup"), dict) else {}
+    if "retention" in body:
+        r = int(body["retention"])
+        bk["retention"] = max(1, min(r, 100))
+    if "auto_hours" in body:
+        h = int(body["auto_hours"])
+        bk["auto_hours"] = max(0, min(h, 168))   # cap at weekly
+    cfg["backup"] = bk
+    _write_file("st:config", json.dumps(cfg))
+    return jsonify({"ok": True, **_backup_settings()})
 
 
 @app.route("/api/system/restore", methods=["POST"])
