@@ -3,6 +3,25 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.7 — Self-healing category/location rebuild + Back button
+
+Two fixes.
+
+**Category tree wasn't rebuilding on the appliance.** The rebuild was gated purely
+on a "done" marker, so if it had ever been marked complete without actually
+building the tree (e.g. fired before the catalog was present), it would never run
+again — leaving the box with almost no categories and no "Uncategorized" bucket.
+The category and Unlocated-location migrations are now self-healing: they re-run
+whenever the expected structure (the grouped tree with "Uncategorized", or the
+"Unlocated" location) isn't actually present, regardless of the marker. Verified
+against the full catalog: rebuilds to 62 nodes, all 4,056 items reachable,
+"Uncategorized" holds the 27 stragglers.
+
+**Back button on the item detail.** Opening an item from the category tree, the
+location tree, or a search now shows a "← Back" button that returns to exactly
+where you were — the same tree position, or the search results with your query
+intact — instead of leaving the browser back button to switch the whole page.
+
 ## 2.9.6 — Show items filed directly in a parent category
 
 Fixes items appearing "missing" from the Categories tab. Previously a category

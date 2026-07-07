@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.6"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.7"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -619,11 +619,23 @@ def _migrate_unlocated_bucket(d):
         cfg = json.loads(_read_file("st:config") or "{}")
     except Exception:
         cfg = {}
-    if isinstance(cfg, dict) and cfg.get("_unlocated_v1"):
-        return
 
     item_count = d.execute("SELECT COUNT(*) c FROM items").fetchone()["c"]
     if item_count == 0:
+        return
+
+    # Self-healing: only treat as done if the marker is set AND an 'Unlocated'
+    # top-level location actually exists.
+    has_unlocated = False
+    for row in d.execute("SELECT data FROM items WHERE type='bin'").fetchall():
+        try:
+            b = json.loads(row["data"])
+        except Exception:
+            continue
+        if b.get("description") == "Unlocated" and b.get("parent_bin_id") in (None, ""):
+            has_unlocated = True
+            break
+    if isinstance(cfg, dict) and cfg.get("_unlocated_v1") and has_unlocated:
         return
 
     # Find the store root (a top-level bin, prefer the AZ Turn and Burn one).
@@ -834,17 +846,28 @@ def _cat_route_by_desc(desc):
 
 
 def _migrate_category_rebuild(d):
-    """Rebuild a grouped category tree and re-map every item. Idempotent."""
+    """Rebuild a grouped category tree and re-map every item. Idempotent.
+
+    Self-healing: even if the completion marker is set, we re-run when the
+    category tree doesn't actually contain the rebuilt groups (e.g. a prior run
+    fired before data was present, or was interrupted). The real signal is
+    whether the tree looks rebuilt, not just the marker."""
     try:
         cfg = json.loads(_read_file("st:config") or "{}")
     except Exception:
         cfg = {}
-    if isinstance(cfg, dict) and cfg.get("_catrebuild_v2"):
-        return
 
     item_rows = d.execute("SELECT id, data FROM items WHERE type IN ('item','container')").fetchall()
     if not item_rows:
         return
+
+    # Does the current tree already look like the rebuilt grouped tree? We check
+    # for a couple of signature group names at the top level.
+    existing = _cat_load()
+    have_names = {n.get("name") for n in existing.values()} if isinstance(existing, dict) else set()
+    looks_rebuilt = "Uncategorized" in have_names and "Parts & Hop-Ups" in have_names
+    if isinstance(cfg, dict) and cfg.get("_catrebuild_v2") and looks_rebuilt:
+        return  # genuinely done
 
     import secrets as _secrets
     tree = {}

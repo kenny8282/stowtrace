@@ -2162,8 +2162,18 @@ el('manualEntryBtn').addEventListener('click', () => {
 
 /* ---- ITEM LOOKUP & DETAIL ---- */
 async function showItemDetail(id, rawPayload) {
+  // Remember where we came from so the detail card can show a Back button that
+  // returns to the previous view (category tree position, location tree
+  // position, or search with its query intact) instead of just clearing.
+  // Don't overwrite the origin if we're navigating item -> item (keep the
+  // original entry point).
+  if (!state._detailOrigin || state._detailReturning) {
+    state._detailOrigin = _captureNavOrigin();
+  }
+  state._detailReturning = false;
+
   // Detail card lives in the Scan tab. If the user is on a different tab
-  // (Bins, Unassigned), switch them to Scan so they see the result.
+  // (Categories, Locations, Unassigned), switch them to Scan so they see it.
   if (state.currentTab !== 'scan') {
     switchTab('scan');
   }
@@ -2225,6 +2235,7 @@ function renderItemDetail(rec) {
 
   let html = `
     <div class="detail-card">
+      ${state._detailOrigin ? `<button class="secondary detail-back-btn" onclick="goBackFromDetail()" style="margin-bottom:12px;font-size:12px;padding:6px 12px;">← Back</button>` : ''}
       <div class="detail-desc">${escapeHtml(primaryText)}</div>
       <div class="detail-type ${typeBadge}">${typeLabel}</div>
   `;
@@ -2462,8 +2473,64 @@ function showScanCard() {
 
 function dismissDetail() {
   el('scanResult').innerHTML = '';
+  state._detailOrigin = null;
   showScanCard();
   startScanner();
+}
+
+// Capture the current view so a Back button can return to it.
+function _captureNavOrigin() {
+  const tab = state.currentTab;
+  if (tab === 'categories') {
+    return { tab, catId: _cat.currentId, facets: { ..._cat.activeFacets } };
+  }
+  if (tab === 'locations') {
+    return { tab, locId: _loc.currentId };
+  }
+  if (tab === 'unassigned') {
+    return { tab, search: (el('unassignedSearch')?.value || '') };
+  }
+  if (tab === 'scan') {
+    // Came from the top search bar (results list) — remember the query.
+    return { tab: 'search', search: (el('topSearch')?.value || '') };
+  }
+  return { tab: tab || 'scan' };
+}
+
+// Return to wherever the user was before opening the item detail.
+function goBackFromDetail() {
+  const origin = state._detailOrigin;
+  el('scanResult').innerHTML = '';
+  state._detailOrigin = null;
+  state._detailReturning = true;
+  if (!origin) { dismissDetail(); state._detailReturning = false; return; }
+
+  if (origin.tab === 'categories') {
+    switchTab('categories');
+    _cat.currentId = origin.catId || null;
+    _cat.activeFacets = origin.facets || {};
+    catRenderCurrent();
+  } else if (origin.tab === 'locations') {
+    switchTab('locations');
+    _loc.currentId = origin.locId || null;
+    renderLocationsTab();
+  } else if (origin.tab === 'unassigned') {
+    switchTab('unassigned');
+    if (el('unassignedSearch')) el('unassignedSearch').value = origin.search || '';
+    renderLists();
+  } else if (origin.tab === 'search') {
+    // Restore the top search with its query and re-show the full results list.
+    switchTab('scan');
+    if (el('topSearch')) el('topSearch').value = origin.search || '';
+    if (origin.search) {
+      searchShowFullResults(origin.search);
+    } else {
+      dismissDetail();
+    }
+  } else {
+    dismissDetail();
+  }
+  state._detailReturning = false;
 }
 
 /* ---- NEW ITEM (UNKNOWN ID SCANNED) ---- */
@@ -4971,6 +5038,7 @@ function setupTopSearch() {
       item.addEventListener('mousedown', e => {
         e.preventDefault();
         if (item.dataset.id) {
+          state._detailOrigin = { tab: 'search', search: input.value.trim() };
           showItemDetail(item.dataset.id);
           input.value = '';
           list.classList.remove('open');
@@ -5025,6 +5093,9 @@ async function searchShowFullResults(query) {
   panel.querySelectorAll('.search-result-row').forEach(row => {
     row.addEventListener('click', () => {
       if (row.dataset.id) {
+        // Capture the search origin BEFORE clearing the query, so Back can
+        // restore this exact results list.
+        state._detailOrigin = { tab: 'search', search: query };
         searchClearFullResults();
         showItemDetail(row.dataset.id);
       }
@@ -5933,7 +6004,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.6';
+const FRONTEND_BUILD = '2.9.7';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
