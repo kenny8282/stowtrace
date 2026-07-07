@@ -1610,13 +1610,14 @@
         </svg>
       </div>
     </div>
-    <div class="scan-status" id="binScanStatus" style="margin-top: 10px;">Looking for a bin QR…</div>
+    <div class="scan-status" id="binScanStatus" style="margin-top: 10px;">Looking for a location QR…</div>
     <div class="field" style="margin-top: 12px;">
-      <label>Or type bin ID</label>
+      <label>Or type location ID</label>
       <input type="text" id="binIdManualInput" placeholder="e.g. JN6EE" maxlength="5" style="text-transform:uppercase;">
     </div>
     <div class="btn-row">
-      <button onclick="confirmBinIdManual()">Use This Bin</button>
+      <button onclick="confirmBinIdManual()">Use This Location</button>
+      <button class="secondary" onclick="browseLocationsFromScan()">Browse locations…</button>
       <button class="secondary" onclick="skipBinAssignment()">Skip (file later)</button>
     </div>
   </div>
@@ -2298,14 +2299,14 @@ function renderItemDetail(rec) {
       // Parent is a location (bins/containers unified into locations in v2.9.0).
       html += `<div class="detail-field"><span class="k">Location</span>
         <span style="color:var(--accent);font-weight:700;cursor:pointer;" onclick="showItemDetail('${rec.bin_id}')">${escapeHtml(binName)}</span>
-        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();openLocationPickerForItem('${rec.id}')">Move</button>` : ''}
+        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();moveItemToLocation('${rec.id}')">Move</button>` : ''}
       </div>`;
       if (locPath) {
         html += `<div class="detail-field"><span class="k">Path</span> ${escapeHtml(locPath)}</div>`;
       }
     } else {
       html += `<div class="detail-field" style="color:var(--accent);"><span class="k">Location</span> Not assigned
-        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();openLocationPickerForItem('${rec.id}')">File here</button>` : ''}
+        ${canEdit() ? `<button class="secondary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="event.stopPropagation();moveItemToLocation('${rec.id}')">File here</button>` : ''}
       </div>`;
     }
     // Quantity stepper row + action button (Buy URL or Google Search).
@@ -5235,6 +5236,21 @@ async function queueLocationLabel(binId, name) {
 }
 
 // --- File an item into a location (navigable hierarchy picker) --------------
+// Move/File now opens the QR scanner first (fast scan-to-file). The scanner
+// modal also has a manual "type location ID" field and a "Browse locations"
+// button that falls back to the full hierarchy picker.
+function moveItemToLocation(itemId) {
+  state.pendingBinSelection = itemId;
+  openBinScanModal();
+}
+
+// From the scanner modal, fall back to browsing the full location hierarchy.
+function browseLocationsFromScan() {
+  const itemId = state.pendingBinSelection;
+  closeBinScanModal();
+  if (itemId) openLocationPickerForItem(itemId);
+}
+
 const _itemLocPicker = { itemId: null, browseId: null };
 function openLocationPickerForItem(itemId) {
   _itemLocPicker.itemId = itemId;
@@ -5896,7 +5912,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.4';
+const FRONTEND_BUILD = '2.9.5';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

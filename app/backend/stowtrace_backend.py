@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.4"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.5"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -532,6 +532,12 @@ def _auth_init():
     except Exception as e:
         app.logger.warning(f"location restructure migration skipped: {e}")
 
+    # Unlocated bucket: an explicit top-level "not yet placed" location.
+    try:
+        _migrate_unlocated_bucket(d)
+    except Exception as e:
+        app.logger.warning(f"unlocated bucket migration skipped: {e}")
+
     # Category tree rebuild (v2.9.3): the seed process left items with detailed
     # category STRINGS that didn't match the coarse category_id tree. This
     # rebuilds a clean, flat tree from the strings and re-maps every item.
@@ -604,6 +610,89 @@ def _migrate_location_restructure(d):
         app.logger.info("location restructure migration applied")
 
 
+def _migrate_unlocated_bucket(d):
+    """Create a top-level 'Unlocated' location and move all items that are
+    currently filed directly under the store root into it. This gives the store
+    an explicit 'not yet placed' bucket, leaving the store root (AZ Turn and
+    Burn) as an empty container to build real sub-locations under. Idempotent."""
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    if isinstance(cfg, dict) and cfg.get("_unlocated_v1"):
+        return
+
+    item_count = d.execute("SELECT COUNT(*) c FROM items").fetchone()["c"]
+    if item_count == 0:
+        return
+
+    # Find the store root (a top-level bin, prefer the AZ Turn and Burn one).
+    root_id = None
+    for row in d.execute("SELECT id, data FROM items WHERE type='bin'").fetchall():
+        try:
+            b = json.loads(row["data"])
+        except Exception:
+            continue
+        if b.get("parent_bin_id") in (None, "") :
+            if b.get("description") == "AZ Turn and Burn":
+                root_id = row["id"]
+                break
+            if root_id is None:
+                root_id = row["id"]
+
+    # Does an 'Unlocated' top-level location already exist?
+    unlocated_id = None
+    for row in d.execute("SELECT id, data FROM items WHERE type='bin'").fetchall():
+        try:
+            b = json.loads(row["data"])
+        except Exception:
+            continue
+        if b.get("description") == "Unlocated" and b.get("parent_bin_id") in (None, ""):
+            unlocated_id = row["id"]
+            break
+
+    # Create it if missing.
+    if unlocated_id is None:
+        import secrets as _secrets
+        alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+        for _ in range(50):
+            cand = "".join(_secrets.choice(alphabet) for _ in range(5))
+            if not d.execute("SELECT 1 FROM used_ids WHERE id=?", (cand,)).fetchone():
+                unlocated_id = cand
+                break
+        node = {
+            "id": unlocated_id, "type": "bin",
+            "description": "Unlocated", "lines": ["Unlocated"],
+            "parent_bin_id": None,
+            "created": _now_iso(), "updated": _now_iso(),
+        }
+        d.execute("INSERT OR IGNORE INTO used_ids(id) VALUES(?)", (unlocated_id,))
+        d.execute("INSERT INTO items(id, type, bin_id, category_id, created, updated, data) "
+                  "VALUES(?,?,?,?,?,?,?)",
+                  (unlocated_id, "bin", None, None, _now_iso(), _now_iso(), json.dumps(node)))
+
+    # Move every item that currently sits directly under the store root into
+    # Unlocated. (Items already filed into real sub-locations are left alone.)
+    moved = 0
+    for row in d.execute("SELECT id, data, bin_id FROM items WHERE type IN ('item','container')").fetchall():
+        if row["bin_id"] == root_id:
+            try:
+                it = json.loads(row["data"])
+            except Exception:
+                continue
+            it["bin_id"] = unlocated_id
+            d.execute("UPDATE items SET data=?, bin_id=? WHERE id=?",
+                      (json.dumps(it), unlocated_id, row["id"]))
+            moved += 1
+
+    d.commit()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["_unlocated_v1"] = True
+    _write_file("st:config", json.dumps(cfg))
+    app.logger.info(f"unlocated bucket migration applied: moved {moved} items")
+
+
 # ---------------------------------------------------------------------------
 # Category rebuild (v2.9.4): rebuild a GROUPED category tree (like the original
 # curated one) from the scraped category strings, with smart routing that also
@@ -632,14 +721,14 @@ _CAT_GROUPS = [
     ("Oils, Grease & Fluids", []),
     ("Toys & Collectables", ["Hot Wheels & Matchbox", "Other Toys"]),
     ("Apparel & Merch", []),
-    ("Miscellaneous", []),
+    ("Uncategorized", []),
 ]
 
 
 def _cat_route(cat):
     """Route a raw category string to (group, sub_or_None)."""
     if not cat or cat.strip() in ("Unclassified", "Accessories"):
-        return ("Miscellaneous", None)
+        return ("Uncategorized", None)
     c = cat.lower()
     def has(*ks): return any(k in c for k in ks)
     if has("hotwheels", "hot wheels", "matchbox"): return ("Toys & Collectables", "Hot Wheels & Matchbox")
@@ -704,14 +793,14 @@ def _cat_route(cat):
         if has("body post", "body mount", "mount"): return ("Parts & Hop-Ups", "Body Mounts & Posts")
         if "bumper" in c: return ("Parts & Hop-Ups", "Bumpers")
         return ("Parts & Hop-Ups", "General Parts")
-    return ("Miscellaneous", None)
+    return ("Uncategorized", None)
 
 
 def _cat_route_by_desc(desc):
     """Fallback routing for Unclassified items, using description keywords.
     Order matters: check 'bearing' before 'led' (avoids matching 'seaLED')."""
     if not desc:
-        return ("Miscellaneous", None)
+        return ("Uncategorized", None)
     c = desc.lower()
     def has(*ks): return any(k in c for k in ks)
     if "servo" in c: return ("Electronics", "Servos")
@@ -741,7 +830,7 @@ def _cat_route_by_desc(desc):
     if has("wrench", "driver", "tool", "plier", "reamer"): return ("Tools & Equipment", "Hand Tools")
     if has("oil", "grease", "fluid", "lube"): return ("Oils, Grease & Fluids", None)
     if has("mount", "plate", "holder", "adapter", "spacer", "shim", " pin", "ball", "filter"): return ("Parts & Hop-Ups", "General Parts")
-    return ("Miscellaneous", None)
+    return ("Uncategorized", None)
 
 
 def _migrate_category_rebuild(d):
@@ -778,7 +867,7 @@ def _migrate_category_rebuild(d):
     def _resolve(gname, sname):
         if sname and (gname, sname) in sub_ids:
             return sub_ids[(gname, sname)]
-        return group_ids.get(gname, group_ids["Miscellaneous"])
+        return group_ids.get(gname, group_ids["Uncategorized"])
 
     # Assign items.
     assignments = {}
@@ -791,9 +880,9 @@ def _migrate_category_rebuild(d):
         g, s = _cat_route(raw)
         # Any item heading for Miscellaneous gets a second chance via its
         # description keywords — this drains the catch-all substantially.
-        if g == "Miscellaneous":
+        if g == "Uncategorized":
             g2, s2 = _cat_route_by_desc(it.get("description"))
-            if g2 != "Miscellaneous":
+            if g2 != "Uncategorized":
                 g, s = g2, s2
         assignments[row["id"]] = _resolve(g, s)
 

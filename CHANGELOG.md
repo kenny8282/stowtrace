@@ -3,6 +3,19 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.5 — Scan-to-file, Uncategorized bucket, Unlocated location
+
+- **Move/File now opens the QR scanner first** for fast location filing: scan a
+  location's QR to file an item instantly, with a manual "type location ID" field
+  and a "Browse locations…" button for the full hierarchy below the scanner.
+- **Uncategorized** — the catch-all category is now named "Uncategorized" (was
+  "Miscellaneous"), so anything not properly categorized has a clear home to sort
+  from later.
+- **Unlocated location** — a new top-level location holds every item until it's
+  physically placed. The store root ("AZ Turn and Burn") is now an empty container
+  to build real sub-locations under; items move out of "Unlocated" into their real
+  spots as the store is organized. All items and photos preserved.
+
 ## 2.9.4 — Grouped category tree with smart routing
 
 Replaces the flat category rebuild (2.9.3) with a curated GROUPED tree, closer to
