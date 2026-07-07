@@ -46,7 +46,7 @@ nmcli connection modify store-ap \
 
 echo "==> Friendly address: making http://inv.store resolve to this box"
 mkdir -p /etc/NetworkManager/dnsmasq-shared.d
-cat > /etc/NetworkManager/dnsmasq-shared.d/stowtrace-inv.conf <<'EOF'
+cat > /etc/NetworkManager/dnsmasq-shared.d/gridfinity-inv.conf <<'EOF'
 # Devices on the inventory WiFi can reach the app at a memorable name
 address=/inv.store/192.168.4.1
 address=/inventory.store/192.168.4.1
