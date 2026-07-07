@@ -798,15 +798,19 @@
   .cat-tree-node {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 10px;
+    padding: 12px 14px;
     background: var(--paper);
     border: 1px solid var(--rule);
-    border-radius: 3px;
+    border-radius: 6px;
+    margin-bottom: 6px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.12s, border-color 0.12s;
   }
-  .cat-tree-node:hover { background: var(--row-alt, #f0f0f0); }
+  .cat-tree-node:hover {
+    background: var(--row-alt, #f5f3ee);
+    border-color: var(--muted);
+  }
   .cat-tree-node .cat-name {
     flex: 1;
     font-weight: 600;
@@ -816,13 +820,16 @@
     font-size: 11px;
     color: var(--muted);
     font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
   }
   .cat-tree-node .cat-chevron {
     color: var(--muted);
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
   }
   .cat-tree-node.leaf {
-    background: linear-gradient(to right, transparent 95%, var(--accent-2) 95%);
+    /* leaf categories are visually identical — no distracting edge bar */
   }
   .cat-tree-node.empty {
     color: var(--muted);
@@ -5886,7 +5893,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.0';
+const FRONTEND_BUILD = '2.9.1';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
