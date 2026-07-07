@@ -3,6 +3,15 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.6 — Show items filed directly in a parent category
+
+Fixes items appearing "missing" from the Categories tab. Previously a category
+only showed its items when it had no sub-categories (a leaf). Items filed directly
+in a parent category — most notably ~500 items in "Wheels & Tires" — were hidden
+behind its sub-category list. Now a parent category shows its sub-categories AND
+any items filed directly in it, so every item is reachable by browsing. All 4,056
+items are now accounted for across the tree (including the "Uncategorized" bucket).
+
 ## 2.9.5 — Scan-to-file, Uncategorized bucket, Unlocated location
 
 - **Move/File now opens the QR scanner first** for fast location filing: scan a

@@ -3788,6 +3788,27 @@ function catRenderCurrent() {
       node.addEventListener('click', () => { _cat.currentId = c.id; _cat.activeFacets = {}; _cat.sortKey = '__name'; _cat.sortDir = 'asc'; catRenderCurrent(); });
       childList.appendChild(node);
     });
+    // A parent category can ALSO hold items filed directly in it (not in a
+    // sub-category). Show those below the sub-category list so nothing is hidden.
+    if (id) {
+      const directItems = catContainersIn(id);
+      if (directItems.length > 0) {
+        const hdr = document.createElement('div');
+        hdr.style.cssText = 'font-size:11px;text-transform:uppercase;color:var(--muted);margin:14px 0 6px;letter-spacing:0.05em;';
+        hdr.textContent = `Items directly in ${escapeHtml(_cat.tree[id].name)} (${directItems.length})`;
+        childList.appendChild(hdr);
+        directItems.sort((a, b) => friendlyName(a).localeCompare(friendlyName(b)));
+        directItems.forEach(it => {
+          const row = document.createElement('div');
+          row.className = 'item-row';
+          row.addEventListener('click', () => showItemDetail(it.id));
+          const sku = it.supplier_sku ? `<div style="font-size:11px;color:var(--muted);font-weight:400;">${escapeHtml(it.supplier_sku)}</div>` : '';
+          row.innerHTML = `<div class="ititle">${escapeHtml(friendlyName(it))}${sku}</div>
+            <div class="imeta">Qty ${it.quantity ?? 0}</div>`;
+          childList.appendChild(row);
+        });
+      }
+    }
   } else if (id) {
     // Leaf: show containers and facets
     catRenderLeaf(id);
@@ -5912,7 +5933,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.5';
+const FRONTEND_BUILD = '2.9.6';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
