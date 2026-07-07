@@ -3,6 +3,14 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.8 — Allow large backup restores
+
+Raised the nginx upload limit from 50 MB to 2 GB (generous headroom). Full backups that include item
+photos run ~150 MB, so restoring one previously failed at the web-server layer
+(413 Request Too Large) before reaching the app — the restore appeared to "fail"
+right after reading the file. update.sh re-applies the nginx config, so this takes
+effect on the next deploy.
+
 ## 2.9.7 — Self-healing category/location rebuild + Back button
 
 Two fixes.
