@@ -5654,7 +5654,15 @@ async function renderAdminTab() {
       <div class="field"><label>Owner PIN (4+ digits)</label><input type="password" id="setupPin" inputmode="numeric"></div>
       <button class="green" onclick="adminEnableBusiness()">Enable Business Mode</button>
       <hr style="margin:18px 0;border:none;border-top:1px solid var(--rule);">
+      <h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);">Backups</h3>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">
+        In Home Mode, backup &amp; restore are available to everyone. (In Business
+        Mode these become owner-only.)
+      </div>
+      <div id="adminBackup">loading…</div>
+      <hr style="margin:18px 0;border:none;border-top:1px solid var(--rule);">
       <div id="buildStampSlot"></div>`;
+    adminLoadBackup();
     return;
   }
   if (!isOwner()) {
@@ -6004,7 +6012,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.8';
+const FRONTEND_BUILD = '2.9.9';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

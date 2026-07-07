@@ -3,6 +3,13 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.9 — Backup & restore available in Home Mode
+
+Backup and restore (Back up now, Restore from File, Restore from USB, Download
+Backup) are now available in the Admin tab while in Home Mode, without having to
+enable Business Mode. The backend already allowed these in Home Mode — the UI just
+wasn't showing them. In Business Mode they remain owner-only, as before.
+
 ## 2.9.8 — Allow large backup restores
 
 Raised the nginx upload limit from 50 MB to 2 GB (generous headroom). Full backups that include item
