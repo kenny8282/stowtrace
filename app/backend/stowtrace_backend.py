@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.4.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.4.1"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -2956,7 +2956,7 @@ def _check_for_updates(do_fetch=True):
     # Try to pull a remote version string from backend file if it differs.
     # We grep for the APP_VERSION assignment in the remote file via git show.
     remote_version = None
-    r_show = _git("show", f"origin/main:backend/stowtrace_backend.py")
+    r_show = _git("show", f"origin/main:app/backend/stowtrace_backend.py")
     if r_show and r_show.returncode == 0:
         import re as _re
         m = _re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', r_show.stdout, _re.MULTILINE)
