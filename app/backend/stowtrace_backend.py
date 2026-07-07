@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.4.1"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.5.0"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -507,6 +507,14 @@ def _auth_init():
             data TEXT NOT NULL
         );
     """)
+    # Migration: pin_set flag (0 = user must choose a PIN at first login).
+    # pin_hash may be empty for users created by an owner who haven't logged in yet.
+    try:
+        cols = [r[1] for r in d.execute("PRAGMA table_info(users)").fetchall()]
+        if "pin_set" not in cols:
+            d.execute("ALTER TABLE users ADD COLUMN pin_set INTEGER NOT NULL DEFAULT 1")
+    except Exception:
+        pass
     d.commit()
 
 
@@ -546,23 +554,40 @@ def _audit(action, item_id=None, detail=None, user=None):
 
 # Central role gate: (METHOD, path-prefix) -> minimum role in business mode.
 # Reads stay open (guest kiosk browses freely); mutations need a session.
+# Tiers (StowTrace permission model):
+#   employee = full day-to-day inventory: add/edit items, adjust qty, move
+#              locations, ADD categories/locations. Cannot DELETE or touch system.
+#   manager  = employee + DELETE (items/categories/locations) + AP/WiFi +
+#              backups/restore.
+#   owner    = manager + user management + audit log + reset.
+# First match wins, so specific rules precede the broad catch-alls.
 _GATE_RULES = [
-    ("POST",   "/api/auth/",        None),        # auth endpoints handle themselves
-    ("GET",    "/api/",             None),        # all reads open (kiosk)
-    ("DELETE", "/api/items/",       "manager"),
-    ("DELETE", "/api/categories/",  "manager"),
-    ("DELETE", "/api/loctree/",     "manager"),
+    ("POST",   "/api/auth/",          None),      # auth endpoints handle themselves
+    ("GET",    "/api/audit",          "owner"),   # audit log = owner only
+    ("GET",    "/api/",               None),      # all other reads open (kiosk)
+
+    # --- owner-only ---
+    ("POST",   "/api/users",          "owner"),
+    ("PUT",    "/api/users/",         "owner"),
+    ("DELETE", "/api/users/",         "owner"),
     ("POST",   "/api/system/restore", "owner"),
-    ("POST",   "/api/ap/config",    "owner"),   # change hotspot SSID/pw = owner only
-    ("POST",   "/api/reset",        "owner"),
-    ("POST",   "/api/categories",   "manager"),
-    ("PUT",    "/api/categories/",  "manager"),
-    ("POST",   "/api/loctree",      "manager"),
-    ("PUT",    "/api/loctree/",     "manager"),
-    ("PUT",    "/api/users/",       "owner"),
-    ("POST",   "/api/users",        "owner"),
-    ("PUT",    "/api/",             "employee"),  # item edits etc.
-    ("POST",   "/api/",             "employee"),  # everything else mutating
+    ("POST",   "/api/reset",          "owner"),
+
+    # --- manager+ ---
+    ("DELETE", "/api/items/",         "manager"),
+    ("DELETE", "/api/categories/",    "manager"),
+    ("DELETE", "/api/loctree/",       "manager"),
+    ("POST",   "/api/ap/config",      "manager"),  # AP control = manager+
+    ("POST",   "/api/system/backup",  "manager"),
+    ("POST",   "/api/system/backup-to-drive", "manager"),
+
+    # --- employee+ (day-to-day inventory freedom) ---
+    ("POST",   "/api/categories",     "employee"), # ADD category ok
+    ("PUT",    "/api/categories/",    "employee"), # EDIT category ok
+    ("POST",   "/api/loctree",        "employee"), # ADD location ok
+    ("PUT",    "/api/loctree/",       "employee"), # EDIT location ok
+    ("PUT",    "/api/",               "employee"), # item edits, qty, moves
+    ("POST",   "/api/",               "employee"), # everything else mutating
 ]
 
 
@@ -603,7 +628,7 @@ def auth_setup():
     if not username or len(pin) < 4:
         abort(400, description="username and a PIN of 4+ digits required")
     _db().execute(
-        "INSERT INTO users(username, pin_hash, role, active, created) VALUES(?,?,?,1,?)",
+        "INSERT INTO users(username, pin_hash, role, active, created, pin_set) VALUES(?,?,?,1,?,1)",
         (username, _pin_hash(pin), "owner", _now_iso()))
     _audit("business_mode_enabled", detail=f"first owner: {username}",
            user={"username": username, "role": "owner"})
@@ -629,8 +654,22 @@ def auth_login():
     body = request.get_json(silent=True) or {}
     username = (body.get("username") or "").strip()
     pin = str(body.get("pin") or "").strip()
-    row = _db().execute("SELECT pin_hash FROM users WHERE username=? AND active=1",
+    row = _db().execute("SELECT id, pin_hash, pin_set FROM users WHERE username=? AND active=1",
                         (username,)).fetchone()
+
+    # First-login PIN selection: if the account has no PIN set yet, the PIN the
+    # user submits BECOMES their PIN (must be 4+ digits). This is how owner-created
+    # accounts get their PIN — the user picks it, the owner never sees it.
+    if row is not None and not row["pin_set"]:
+        if len(pin) < 4:
+            abort(400, description="choose a PIN of 4 or more digits")
+        _db().execute("UPDATE users SET pin_hash=?, pin_set=1 WHERE id=?",
+                      (_pin_hash(pin), row["id"]))
+        _db().commit()
+        _audit("pin_set_first_login", detail=username,
+               user={"username": username, "role": None})
+        return _login_response(username)
+
     if not row or row["pin_hash"] != _pin_hash(pin):
         _audit("login_failed", detail=username,
                user={"username": username, "role": None})
@@ -657,50 +696,86 @@ def users_list():
             # Non-owners get names only (login picker needs them)
             rows = _db().execute("SELECT username FROM users WHERE active=1 ORDER BY username").fetchall()
             return jsonify({"users": [{"username": r["username"]} for r in rows]})
-    rows = _db().execute("SELECT id, username, role, active, created FROM users ORDER BY username").fetchall()
+    rows = _db().execute("SELECT id, username, role, active, created, pin_set FROM users ORDER BY username").fetchall()
+    # PINs are hashed and never viewable. We report whether a PIN is set so the
+    # owner UI can show "set" vs "awaiting first login", and offer reset.
     return jsonify({"users": [dict(r) for r in rows]})
 
 
 @app.route("/api/users", methods=["POST"])
 def users_create():
+    """Owner creates a user with a username + role only. The user chooses
+    their own PIN at first login (pin_set=0 until then)."""
     body = request.get_json(silent=True) or {}
     username = (body.get("username") or "").strip()
-    pin = str(body.get("pin") or "").strip()
     role = body.get("role")
-    if not username or len(pin) < 4 or role not in ROLE_LEVELS:
-        abort(400, description="username, 4+ digit PIN, and valid role required")
+    if not username or role not in ROLE_LEVELS:
+        abort(400, description="username and valid role (employee/manager/owner) required")
+    if len(username) > 32:
+        abort(400, description="username too long")
     try:
         _db().execute(
-            "INSERT INTO users(username, pin_hash, role, active, created) VALUES(?,?,?,1,?)",
-            (username, _pin_hash(pin), role, _now_iso()))
+            "INSERT INTO users(username, pin_hash, role, active, created, pin_set) VALUES(?,?,?,1,?,0)",
+            (username, "", role, _now_iso()))
     except sqlite3.IntegrityError:
         abort(400, description="username already exists")
     _audit("user_created", detail={"username": username, "role": role})
     return jsonify({"ok": True})
 
 
+def _owner_count():
+    r = _db().execute("SELECT COUNT(*) c FROM users WHERE role='owner' AND active=1").fetchone()
+    return r["c"] if r else 0
+
+
 @app.route("/api/users/<username>", methods=["PUT"])
 def users_update(username):
+    """Owner updates a user. Supports instant role change and PIN reset.
+    Guards the last remaining owner from being demoted or deactivated."""
     body = request.get_json(silent=True) or {}
-    row = _db().execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+    row = _db().execute("SELECT id, role FROM users WHERE username=?", (username,)).fetchone()
     if not row:
         abort(404)
+
+    # --- last-owner protection ---
+    if row["role"] == "owner" and _owner_count() <= 1:
+        if body.get("role") and body["role"] != "owner":
+            abort(400, description="cannot demote the last owner")
+        if "active" in body and not body["active"]:
+            abort(400, description="cannot deactivate the last owner")
+
     if "role" in body:
         if body["role"] not in ROLE_LEVELS:
             abort(400, description="invalid role")
         _db().execute("UPDATE users SET role=? WHERE id=?", (body["role"], row["id"]))
+        _audit("user_role_changed", detail={"username": username, "role": body["role"]})
     if "active" in body:
         _db().execute("UPDATE users SET active=? WHERE id=?",
                       (1 if body["active"] else 0, row["id"]))
         if not body["active"]:
             _db().execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
-    if "pin" in body:
-        pin = str(body["pin"]).strip()
-        if len(pin) < 4:
-            abort(400, description="PIN too short")
-        _db().execute("UPDATE users SET pin_hash=? WHERE id=?", (_pin_hash(pin), row["id"]))
-    _audit("user_updated", detail={"username": username,
-                                   "fields": [k for k in body.keys() if k != "pin"] + (["pin"] if "pin" in body else [])})
+    # PIN reset: clear the PIN so the user must choose a new one at next login.
+    # (Owners can't set a PIN for someone — the user picks it themselves.)
+    if body.get("reset_pin"):
+        _db().execute("UPDATE users SET pin_hash='', pin_set=0 WHERE id=?", (row["id"],))
+        _db().execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
+        _audit("user_pin_reset", detail={"username": username})
+    _db().commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<username>", methods=["DELETE"])
+def users_delete(username):
+    """Delete a user entirely. Refuses to delete the last active owner."""
+    row = _db().execute("SELECT id, role FROM users WHERE username=?", (username,)).fetchone()
+    if not row:
+        abort(404)
+    if row["role"] == "owner" and _owner_count() <= 1:
+        abort(400, description="cannot delete the last owner")
+    _db().execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
+    _db().execute("DELETE FROM users WHERE id=?", (row["id"],))
+    _db().commit()
+    _audit("user_deleted", detail={"username": username})
     return jsonify({"ok": True})
 
 

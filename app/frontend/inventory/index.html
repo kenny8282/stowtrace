@@ -1477,11 +1477,12 @@
     <h2 style="margin-top:0;">Sign In</h2>
     <div class="field">
       <label>Who are you?</label>
-      <select id="loginUser"></select>
+      <select id="loginUser" onchange="updateLoginHint()"></select>
     </div>
     <div class="field">
       <label>PIN</label>
       <input type="password" id="loginPin" inputmode="numeric" placeholder="••••" autocomplete="off">
+      <div id="loginHint" style="display:none;font-size:11px;color:var(--accent);margin-top:4px;"></div>
     </div>
     <div class="btn-row" style="margin-top:14px;">
       <button class="green" onclick="doLogin()" style="width:100%;">Sign In</button>
@@ -5221,8 +5222,10 @@ async function authGateUI() {
     // Show login overlay with the user picker
     try {
       const j = await (await fetch('/api/users')).json();
+      _loginUsers = {};
       el('loginUser').innerHTML = (j.users || [])
-        .map(u => `<option value="${escapeAttr(u.username)}">${escapeHtml(u.username)}</option>`).join('');
+        .map(u => { _loginUsers[u.username] = u; return `<option value="${escapeAttr(u.username)}">${escapeHtml(u.username)}</option>`; }).join('');
+      updateLoginHint();
     } catch (e) {}
     el('loginOverlay').style.display = 'flex';
   } else {
@@ -5230,18 +5233,41 @@ async function authGateUI() {
   }
 }
 
+// Track user pin_set status so we can prompt "choose a PIN" on first login.
+let _loginUsers = {};
+function updateLoginHint() {
+  const sel = el('loginUser');
+  const hint = el('loginHint');
+  if (!sel || !hint) return;
+  const u = _loginUsers[sel.value];
+  if (u && !u.pin_set) {
+    hint.textContent = 'First login — choose a PIN (4+ digits). This becomes your PIN.';
+    hint.style.display = 'block';
+    el('loginPin').placeholder = 'Choose a PIN';
+  } else {
+    hint.style.display = 'none';
+    el('loginPin').placeholder = '••••';
+  }
+}
+
 async function doLogin() {
   const username = el('loginUser').value;
   const pin = el('loginPin').value;
+  const wasFirstLogin = _loginUsers[username] && !_loginUsers[username].pin_set;
   const r = await fetch('/api/auth/login', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, pin }) });
-  if (!r.ok) { toast('Wrong PIN', 'red'); el('loginPin').value = ''; return; }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    toast(wasFirstLogin ? (j.description || 'Choose a 4+ digit PIN') : 'Wrong PIN', 'red');
+    el('loginPin').value = '';
+    return;
+  }
   const j = await r.json();
   _auth.user = j.user;
   el('loginPin').value = '';
   el('loginOverlay').style.display = 'none';
-  toast(`Signed in as ${j.user.username}`, 'green');
+  toast(wasFirstLogin ? `PIN set — welcome, ${j.user.username}` : `Signed in as ${j.user.username}`, 'green');
 }
 
 function guestBrowse() {
@@ -5299,11 +5325,13 @@ async function renderAdminTab() {
   p.innerHTML = `<h2>Admin <span style="float:right;font-size:11px;font-weight:400;">
       ${escapeHtml(_auth.user.username)} (owner) · <a href="#" onclick="doLogout();return false;">sign out</a></span></h2>
     <h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);">Users</h3>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">
+      New users pick their own PIN at first login. Trash by PIN = reset it; trash at right = delete user.
+    </div>
     <div id="adminUsers"></div>
     <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap;">
-      <input type="text" id="nuName" placeholder="username" style="flex:1;min-width:100px;">
-      <input type="password" id="nuPin" placeholder="PIN" inputmode="numeric" style="width:80px;">
-      <select id="nuRole" style="width:110px;">
+      <input type="text" id="nuName" placeholder="new username" style="flex:1;min-width:120px;">
+      <select id="nuRole" style="width:120px;">
         <option value="employee">employee</option>
         <option value="manager">manager</option>
         <option value="owner">owner</option>
@@ -5334,33 +5362,89 @@ async function adminEnableBusiness() {
 
 async function adminLoadUsers() {
   const j = await (await fetch('/api/users')).json();
-  el('adminUsers').innerHTML = (j.users || []).map(u => `
-    <div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--rule);font-size:12px;">
-      <strong style="flex:1;">${escapeHtml(u.username)}</strong>
-      <span style="color:var(--muted);">${escapeHtml(u.role || '')}</span>
-      ${u.active === 0 ? '<span style="color:var(--accent);">disabled</span>'
-        : `<a href="#" style="font-size:11px;" onclick="adminDisableUser('${escapeAttr(u.username)}');return false;">disable</a>`}
-    </div>`).join('');
+  const me = _auth.user ? _auth.user.username : null;
+  const owners = (j.users || []).filter(u => u.role === 'owner' && u.active !== 0).length;
+  el('adminUsers').innerHTML = (j.users || []).map(u => {
+    const isLastOwner = (u.role === 'owner' && owners <= 1);
+    const pinStatus = u.pin_set
+      ? '<span style="color:var(--muted);">PIN set</span>'
+      : '<span style="color:var(--accent);">awaiting first login</span>';
+    // Role dropdown — instant apply on change. Last owner's dropdown is locked.
+    const roleSelect = `<select onchange="adminSetRole('${escapeAttr(u.username)}', this.value)"
+        ${isLastOwner ? 'disabled title="Cannot change the last owner"' : ''}
+        style="font-size:12px;padding:2px 4px;">
+        <option value="employee" ${u.role === 'employee' ? 'selected' : ''}>employee</option>
+        <option value="manager"  ${u.role === 'manager'  ? 'selected' : ''}>manager</option>
+        <option value="owner"    ${u.role === 'owner'    ? 'selected' : ''}>owner</option>
+      </select>`;
+    // Reset-PIN trashcan (disabled if PIN not yet set — nothing to reset)
+    const resetBtn = `<button title="Reset PIN (user re-picks at next login)"
+        onclick="adminResetPin('${escapeAttr(u.username)}')"
+        ${!u.pin_set ? 'disabled' : ''}
+        style="background:none;border:none;cursor:pointer;opacity:${u.pin_set ? 1 : 0.3};font-size:14px;">🗑</button>`;
+    // Delete-user trashcan (disabled for last owner)
+    const delBtn = `<button title="Delete user"
+        onclick="adminDeleteUser('${escapeAttr(u.username)}')"
+        ${isLastOwner ? 'disabled' : ''}
+        style="background:none;border:none;cursor:pointer;opacity:${isLastOwner ? 0.3 : 1};font-size:14px;color:#c0392b;">🗑</button>`;
+    return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule);font-size:12px;">
+      <strong style="flex:1;min-width:60px;">${escapeHtml(u.username)}${u.username === me ? ' <span style="color:var(--muted);font-weight:400;">(you)</span>' : ''}</strong>
+      <span style="width:120px;font-size:11px;display:flex;align-items:center;gap:4px;">${pinStatus} ${resetBtn}</span>
+      ${roleSelect}
+      ${delBtn}
+    </div>`;
+  }).join('');
 }
 
 async function adminCreateUser() {
   const username = (el('nuName').value || '').trim();
-  const pin = el('nuPin').value;
   const role = el('nuRole').value;
+  if (!username) { toast('Username required', 'red'); return; }
   const r = await fetch('/api/users', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, pin, role }) });
-  if (!r.ok) { toast('Create failed (name taken? PIN too short?)', 'red'); return; }
-  el('nuName').value = ''; el('nuPin').value = '';
-  toast('User added', 'green');
+    body: JSON.stringify({ username, role }) });
+  if (!r.ok) { toast('Create failed (name taken?)', 'red'); return; }
+  el('nuName').value = '';
+  toast(`${username} added — they set their PIN at first login`, 'green');
   adminLoadUsers();
 }
 
-async function adminDisableUser(username) {
-  if (!confirm(`Disable ${username}? Their session ends immediately.`)) return;
-  await fetch('/api/users/' + encodeURIComponent(username), { method: 'PUT',
+// Instant role change (no save button).
+async function adminSetRole(username, role) {
+  const r = await fetch('/api/users/' + encodeURIComponent(username), { method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ active: false }) });
+    body: JSON.stringify({ role }) });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    toast(j.description || 'Role change blocked', 'red');
+    adminLoadUsers();   // revert the dropdown
+    return;
+  }
+  toast(`${username} → ${role}`, 'green');
+  adminLoadUsers();
+}
+
+// Reset PIN: user must choose a new one at next login.
+async function adminResetPin(username) {
+  if (!confirm(`Reset ${username}'s PIN?\nThey'll pick a new one at next login and be signed out now.`)) return;
+  const r = await fetch('/api/users/' + encodeURIComponent(username), { method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reset_pin: true }) });
+  if (!r.ok) { toast('Reset failed', 'red'); return; }
+  toast(`${username}'s PIN reset`, 'green');
+  adminLoadUsers();
+}
+
+// Delete a user entirely.
+async function adminDeleteUser(username) {
+  if (!confirm(`Delete ${username} completely? This cannot be undone.`)) return;
+  const r = await fetch('/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    toast(j.description || 'Delete blocked', 'red');
+    return;
+  }
+  toast(`${username} deleted`, 'green');
   adminLoadUsers();
 }
 
@@ -5389,7 +5473,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.4.0';
+const FRONTEND_BUILD = '2.5.0';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
