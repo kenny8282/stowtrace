@@ -3,6 +3,13 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.7.1 — Backup/restore in inventory Admin + USB restore fix
+
+- **Full backup & restore now lives in the inventory Admin (⚙) panel**: drive
+  status, retention, auto-backup interval, Back up now, Restore from File,
+  Restore from USB (backup picker), and Download Backup — all in one place.
+- Fixed a "Restore from USB" error on the Label Forge page (missing escape helper).
+
 ## 2.7.0 — Restore from USB drive
 
 - **Restore from USB Drive** button (Label Forge → Backup & Restore): lists the

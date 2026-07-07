@@ -5417,7 +5417,95 @@ async function adminLoadBackup() {
     <div style="margin-top:10px;">
       <button class="green" onclick="adminBackupNow()">Back up now to USB</button>
       <span id="adminBackupMsg" style="font-size:12px;margin-left:8px;color:var(--muted);"></span>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--rule);">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Restore (additive — only missing items are added, current data is never overwritten):</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;">
+        <button class="secondary" onclick="document.getElementById('adminRestoreFile').click()">Restore from File</button>
+        <button class="secondary" onclick="adminShowDriveRestorePicker()" ${(drive.mounted && drive.is_stowtrace_drive && drive.backup_count > 0) ? '' : 'disabled title="No USB backups available"'}>Restore from USB</button>
+        <button class="secondary" onclick="adminDownloadBackup()">Download Backup</button>
+        <input type="file" id="adminRestoreFile" accept="application/json,.json" style="display:none;" onchange="adminRestoreFromFile(event)">
+      </div>
+      <div id="adminRestorePicker" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--rule);border-radius:4px;">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Choose a backup from the USB drive:</div>
+        <div id="adminRestoreList" style="font-size:12px;max-height:220px;overflow:auto;"></div>
+        <div style="text-align:right;margin-top:6px;"><button class="secondary" onclick="document.getElementById('adminRestorePicker').style.display='none'">Cancel</button></div>
+      </div>
+      <div id="adminRestoreMsg" style="font-size:12px;margin-top:6px;color:var(--muted);"></div>
     </div>`;
+}
+
+function adminDownloadBackup() {
+  window.location.href = '/api/system/backup';
+}
+
+async function adminRestoreFromFile(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const msg = el('adminRestoreMsg');
+  if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Reading file…'; }
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const r = await fetch('/api/system/restore', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      if (msg) { msg.style.color = '#1a5d1a'; msg.textContent = `✓ Restored — ${j.added_items || 0} added, ${j.skipped_items || 0} already present`; }
+    } else {
+      if (msg) { msg.style.color = '#c0392b'; msg.textContent = '✗ ' + (j.description || j.error || 'restore failed'); }
+    }
+  } catch (e) {
+    if (msg) { msg.style.color = '#c0392b'; msg.textContent = '✗ Not a valid backup file'; }
+  }
+}
+
+async function adminShowDriveRestorePicker() {
+  const picker = el('adminRestorePicker');
+  const list = el('adminRestoreList');
+  if (!picker || !list) return;
+  list.innerHTML = 'Loading…';
+  picker.style.display = 'block';
+  try {
+    const j = await (await fetch('/api/system/drive-backups', { cache: 'no-store' })).json();
+    if (!j.available || !(j.backups || []).length) {
+      list.innerHTML = '<span style="color:var(--muted);">No backups found on the drive.</span>';
+      return;
+    }
+    list.innerHTML = j.backups.map(b => {
+      const when = new Date(b.modified * 1000).toLocaleString();
+      const kb = (b.size_bytes / 1024).toFixed(0);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(b.filename)}</div>
+          <div style="font-size:10px;color:var(--muted);">${escapeHtml(when)} · ${kb} KB</div>
+        </div>
+        <button class="secondary" style="white-space:nowrap;" onclick="adminRestoreFromDrive('${escapeAttr(b.filename)}')">Restore this</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = 'Error loading backups: ' + escapeHtml(e.message);
+  }
+}
+
+async function adminRestoreFromDrive(filename) {
+  if (!confirm(`Restore from "${filename}"?\n\nAdditive — only items not already present are added. Current data is never overwritten.`)) return;
+  const msg = el('adminRestoreMsg');
+  try {
+    const r = await fetch('/api/system/restore-from-drive', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      const s = j.summary || {};
+      if (msg) { msg.style.color = '#1a5d1a'; msg.textContent = `✓ Restored — ${s.added_items || 0} added, ${s.skipped_items || 0} already present, ${s.added_photos || 0} photos`; }
+      el('adminRestorePicker').style.display = 'none';
+    } else {
+      if (msg) { msg.style.color = '#c0392b'; msg.textContent = '✗ ' + (j.description || j.error || 'restore failed'); }
+    }
+  } catch (e) {
+    if (msg) { msg.style.color = '#c0392b'; msg.textContent = '✗ Request failed'; }
+  }
 }
 
 async function adminSaveBackupSettings() {
@@ -5588,7 +5676,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.7.0';
+const FRONTEND_BUILD = '2.7.1';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';

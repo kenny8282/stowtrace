@@ -2925,7 +2925,7 @@ async function showDriveBackupPicker() {
           <div style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(b.filename)}</div>
           <div style="font-size:10px;color:var(--muted);">${escapeHtml(when)} · ${kb} KB</div>
         </div>
-        <button class="secondary" style="white-space:nowrap;" onclick="restoreFromDrive('${escapeAttr(b.filename)}')">Restore this</button>
+        <button class="secondary" style="white-space:nowrap;" onclick="restoreFromDrive('${escapeHtml(b.filename)}')">Restore this</button>
       </div>`;
     }).join('');
   } catch (e) {
