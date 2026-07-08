@@ -4220,8 +4220,10 @@ function reshapeLabelFormatForPrinter() {
 }
 
 async function refreshPrinterStatus() {
-  // Also refresh the printer list/dropdown so connection dots stay current.
-  loadPrinters();
+  // Refresh the printer list/dropdown + options panel first (awaited so the
+  // panel is populated before status rendering runs — prevents the panel from
+  // flashing in then vanishing due to a render race).
+  await loadPrinters();
   const dot = el('printerDot'); const text = el('printerText');
   const btn = document.querySelector('.printer-refresh');
   if (!dot || !text) return;
@@ -4235,7 +4237,6 @@ async function refreshPrinterStatus() {
     _lastPrinterStatus = d;
     renderPrinterStatusText(d);
     updateTapeStatusHint();
-    updateOverrideVisibility();
     // If cartridge width or connection changed, re-render Maker (printability indicators).
     const widthChanged = (d.tape_width_mm || null) !== prevWidth;
     const connectionChanged = !!d.connected !== !!prevConnected;
@@ -4243,7 +4244,6 @@ async function refreshPrinterStatus() {
   } catch (e) {
     dot.className = 'dot err'; text.textContent = 'Offline';
     _lastPrinterStatus = null;
-    updateOverrideVisibility();
     renderTable('maker');
   }
   finally { if (btn) btn.disabled = false; }
