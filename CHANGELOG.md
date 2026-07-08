@@ -3,6 +3,19 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.14 — Fix inaccessible items + printer panel disappearing
+
+- **All items are reachable again.** Items whose category pointed at a category
+  that no longer exists (orphaned by the earlier restore/dedup bug) are now
+  re-filed into "Uncategorized" automatically on startup, so nothing is stranded
+  and unbrowsable. Combined with the duplicate-category healing, every item is
+  reachable through the category tree. Verified against the full 4,056-item catalog.
+- Added a manual repair action (POST /api/categories/repair) that runs the same
+  dedup + orphan fix on demand and reports what it fixed.
+- **Printer selection panel no longer flashes then disappears.** The printer
+  status refresh now waits for the printer list/options panel to populate before
+  rendering status, fixing the race that made the selector vanish after load.
+
 ## 2.9.13 — Seamless in-place updates (no manual refresh)
 
 Changes now reflect immediately without needing a manual page refresh, and without
