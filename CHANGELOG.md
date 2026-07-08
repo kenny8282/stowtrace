@@ -3,6 +3,20 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.13 — Seamless in-place updates (no manual refresh)
+
+Changes now reflect immediately without needing a manual page refresh, and without
+a jarring full-screen reload.
+
+- Inventory: after any item change, the tab you're currently viewing (Categories,
+  Locations) re-renders in place with the fresh data — item counts and lists update
+  live while you browse, keeping your drill-down position.
+- Label Forge: changing the Zebra label size updates existing rows and the preview
+  instantly. Dropdowns and checkboxes now update the preview immediately instead of
+  after a short delay; text typing still debounces so it doesn't render on every
+  keystroke.
+- The Admin panel won't rebuild while you're typing in it (preserves focus/input).
+
 ## 2.9.12 — Restore merges instead of duplicating + forge tape-width panel
 
 **Restore fixes (important):**
