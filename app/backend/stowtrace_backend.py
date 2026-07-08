@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.11"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.12"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -546,6 +546,13 @@ def _auth_init():
     except Exception as e:
         app.logger.warning(f"category rebuild migration skipped: {e}")
 
+    # Heal duplicate categories (same path, different ids) left by a restore bug.
+    # No-op once the tree is clean; safe to run every startup.
+    try:
+        _dedupe_categories(d)
+    except Exception as e:
+        app.logger.warning(f"category dedupe skipped: {e}")
+
 
 def _migrate_location_restructure(d):
     """Idempotent Stage 1 migration. Safe to run repeatedly.
@@ -944,6 +951,79 @@ def _migrate_category_rebuild(d):
     cfg["_catrebuild_v2"] = True
     _write_file("st:config", json.dumps(cfg))
     app.logger.info(f"category rebuild v2 applied: {len(tree)} nodes, {len(assignments)} items")
+
+
+def _dedupe_categories(d):
+    """Merge duplicate category nodes that share the same name-path (heals the
+    restore bug that added a second copy of every category). For each duplicate
+    group we keep one canonical id, repoint children + items to it, and delete
+    the extras. Idempotent — a no-op when the tree has no duplicates."""
+    try:
+        categories = json.loads(_read_file("st:categories") or "{}")
+    except Exception:
+        return
+    if not isinstance(categories, dict) or not categories:
+        return
+
+    def path_of(node_id):
+        names, cur, seen = [], node_id, set()
+        while cur and cur in categories and cur not in seen:
+            seen.add(cur)
+            n = categories[cur]
+            names.append((n.get("name") or "").strip().lower())
+            cur = n.get("parent_id")
+        return "/".join(reversed(names))
+
+    # Group category ids by path.
+    by_path = {}
+    for cid, node in categories.items():
+        if isinstance(node, dict):
+            by_path.setdefault(path_of(cid), []).append(cid)
+
+    # Build id -> canonical id map (first id in each group wins).
+    canonical = {}
+    dupes_found = False
+    for path, ids in by_path.items():
+        keep = ids[0]
+        for cid in ids:
+            canonical[cid] = keep
+            if cid != keep:
+                dupes_found = True
+
+    if not dupes_found:
+        return  # clean tree, nothing to do
+
+    # Repoint parent_id of every kept node through the canonical map, and drop
+    # the duplicate nodes.
+    new_categories = {}
+    for cid, node in categories.items():
+        if canonical.get(cid) != cid:
+            continue  # a duplicate — will be dropped
+        nn = dict(node)
+        p = nn.get("parent_id")
+        if p and p in canonical:
+            nn["parent_id"] = canonical[p]
+        new_categories[cid] = nn
+
+    # Repoint items whose category_id pointed at a dropped duplicate.
+    moved = 0
+    for row in d.execute("SELECT id, data, category_id FROM items WHERE type IN ('item','container')").fetchall():
+        cidv = row["category_id"]
+        if cidv and cidv in canonical and canonical[cidv] != cidv:
+            newc = canonical[cidv]
+            try:
+                it = json.loads(row["data"])
+            except Exception:
+                continue
+            it["category_id"] = newc
+            d.execute("UPDATE items SET data=?, category_id=? WHERE id=?",
+                      (json.dumps(it), newc, row["id"]))
+            moved += 1
+
+    _write_file("st:categories", json.dumps(new_categories))
+    d.commit()
+    removed = len(categories) - len(new_categories)
+    app.logger.info(f"category dedupe: removed {removed} duplicate categories, repointed {moved} items")
 
 
 def _pin_hash(pin):
@@ -2299,26 +2379,9 @@ def _apply_restore(data):
     else:
         abort(400, description="unsupported backup schema; expected stowtrace-backup/* or stowtrace-inventory/*")
 
-    # ---- Merge items (registry + used) ----
-    for it in incoming_items:
-        if not isinstance(it, dict):
-            continue
-        rid = it.get("id")
-        if not rid:
-            continue
-        if rid in registry:
-            summary["skipped_items"] += 1
-            continue
-        registry[rid] = it
-        used.add(rid)
-        summary["added_items"] += 1
-
-    # Also seed used IDs from the backup that aren't already present.
-    # (Catches edge cases where a backup has IDs in used[] but missing from the
-    # registry — preserve the reservation so we don't recycle the ID.)
-    for rid in incoming_used:
-        if isinstance(rid, str) and rid not in used:
-            used.add(rid)
+    # ---- Merge items DEFERRED until after categories are resolved ----
+    # (Item category_ids must be remapped through the category dedup remap, so we
+    # merge items further below once cat_id_remap exists.)
 
     # ---- Merge presets (match by name; current wins) ----
     def merge_presets(current, incoming):
@@ -2346,15 +2409,105 @@ def _apply_restore(data):
     summary["added_presets"] += a
     summary["skipped_presets"] += s
 
-    # ---- Merge categories (by id; current wins) ----
-    for cid, cnode in incoming_categories.items():
-        if not isinstance(cnode, dict) or not cnode.get("id"):
-            continue
-        if cid in categories:
+    # ---- Merge categories by IDENTITY (name + parent path), not random id ----
+    # Categories use random cat_xxxx ids, so the same logical category can have
+    # different ids in the current tree vs the backup. Merging by id would create
+    # duplicates (two "Electronics" nodes). Instead we match by full path: if an
+    # incoming category already exists (same name under the same parent path), we
+    # reuse the existing node and remap any incoming items that referenced the
+    # backup's id to the existing id.
+
+    def _path_of(node_id, tree):
+        """Return the '/'-joined name path for a category id within a tree."""
+        names, cur, seen = [], node_id, set()
+        while cur and cur in tree and cur not in seen:
+            seen.add(cur)
+            n = tree[cur]
+            names.append((n.get("name") or "").strip().lower())
+            cur = n.get("parent_id")
+        return "/".join(reversed(names))
+
+    # Index existing categories by their path.
+    existing_by_path = {}
+    for cid, cnode in categories.items():
+        if isinstance(cnode, dict) and cnode.get("id"):
+            existing_by_path[_path_of(cid, categories)] = cid
+
+    # Walk incoming categories parent-first so parents resolve before children.
+    # Build a remap: incoming_cat_id -> resolved_cat_id (existing or newly added).
+    cat_id_remap = {}
+
+    def _resolve_incoming_cat(in_id):
+        """Resolve an incoming category id to a live id, creating it under the
+        correct (already-resolved) parent if it doesn't exist. Memoized."""
+        if in_id in cat_id_remap:
+            return cat_id_remap[in_id]
+        node = incoming_categories.get(in_id)
+        if not isinstance(node, dict):
+            return None
+        in_path = _path_of(in_id, incoming_categories)
+        # Already exists by path? Reuse it.
+        if in_path in existing_by_path:
+            cat_id_remap[in_id] = existing_by_path[in_path]
             summary["skipped_categories"] += 1
-            continue
-        categories[cid] = cnode
+            return cat_id_remap[in_id]
+        # Doesn't exist — add it, but first resolve/repoint its parent.
+        parent_in = node.get("parent_id")
+        parent_resolved = _resolve_incoming_cat(parent_in) if parent_in else None
+        new_node = dict(node)
+        new_node["parent_id"] = parent_resolved
+        categories[in_id] = new_node          # keep the incoming id (it's unique)
+        existing_by_path[in_path] = in_id
+        cat_id_remap[in_id] = in_id
         summary["added_categories"] += 1
+        return in_id
+
+    for cid in list(incoming_categories.keys()):
+        _resolve_incoming_cat(cid)
+
+    # Remap incoming ITEMS' category_id via cat_id_remap so restored items point
+    # at the deduplicated categories (done below when merging items uses this).
+
+    # ---- Merge items now (with category_id remap) ----
+    # "Same item" = same id. Current wins on conflict (we don't overwrite an item
+    # that already exists), so re-restoring is safe and idempotent.
+    for it in incoming_items:
+        if not isinstance(it, dict):
+            continue
+        rid = it.get("id")
+        if not rid:
+            continue
+        # Remap the item's category to the deduplicated category id.
+        old_cat = it.get("category_id")
+        if old_cat and old_cat in cat_id_remap:
+            it = dict(it)
+            it["category_id"] = cat_id_remap[old_cat]
+        if rid in registry:
+            # Item already present — merge missing fields without overwriting
+            # existing values (current wins), and backfill a category if the
+            # current copy lacks one but the backup has it.
+            cur = registry[rid]
+            if isinstance(cur, dict):
+                changed = False
+                if not cur.get("category_id") and it.get("category_id"):
+                    cur["category_id"] = it["category_id"]
+                    changed = True
+                # Backfill other empty-but-available scalar fields.
+                for k in ("category", "description", "supplier_sku", "notes"):
+                    if not cur.get(k) and it.get(k):
+                        cur[k] = it[k]
+                        changed = True
+                if changed:
+                    registry[rid] = cur
+            summary["skipped_items"] += 1
+            continue
+        registry[rid] = it
+        used.add(rid)
+        summary["added_items"] += 1
+
+    for rid in incoming_used:
+        if isinstance(rid, str) and rid not in used:
+            used.add(rid)
 
     # ---- Write everything back atomically ----
     # Note: the registry write routes through _registry_replace, which also
