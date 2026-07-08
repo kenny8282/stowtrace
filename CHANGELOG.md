@@ -3,6 +3,12 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.17 — Back button works from the Needs Photo tab
+
+Opening an item from the Needs Photo tab and tapping Back now returns to the Needs
+Photo list (with your search preserved) instead of jumping to the Scan tab. As a
+bonus, once you add a photo and go back, that item drops off the list automatically.
+
 ## 2.9.16 — Printer switch updates format + Camera/Upload photo buttons
 
 - Switching printers now updates the Label Format to match: switching to Brother
