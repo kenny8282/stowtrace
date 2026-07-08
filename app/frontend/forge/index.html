@@ -4264,9 +4264,15 @@ function reshapeLabelFormatForPrinter() {
       if (wrap) wrap.style.display = 'none';
     }
   } else {
-    // Brother tape: width = tape width (chosen), length from content. Editable.
+    // Brother tape: width = length (editable), height = tape width. Set the
+    // height to the active tape width so new rows fit the selected/loaded tape.
     if (wInput) { wInput.readOnly = false; wInput.style.opacity = ''; }
     if (hInput) { hInput.readOnly = false; hInput.style.opacity = ''; }
+    const tapeH = getActiveTapeHeight();
+    if (tapeH != null && hInput) {
+      hInput.value = tapeH;
+      if (state && state.maker) state.maker.formatH = tapeH;
+    }
     const colorSel = el('makerColor') || el('makerColorSel');
     if (colorSel) {
       const wrap = colorSel.closest('.field') || colorSel.parentElement;
