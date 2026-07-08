@@ -3,6 +3,25 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.15 — Needs Photo tab + cleaner Label Forge
+
+**Needs Photo tab (inventory):**
+- New tab listing every item without a photo, so you can work through them and add
+  photos. Items drop off the list automatically once they have a photo. It's a pure
+  filter — categories and locations are never changed. A badge shows the count.
+
+**Label Forge cleanup:**
+- The labels/rows box now has a title ("Brother Labels" / "Zebra Labels") like the
+  other panels, and it reflects the selected printer.
+- Rows are tagged by the printer they were created for. The table shows only labels
+  for the currently-selected printer; the others stay saved and previewable — just
+  switch printers to see them. A small note shows how many are hidden. This keeps
+  the table uncluttered and lets a label of any type be previewed (only ones for the
+  selected printer actually print).
+- The Tape Color column is hidden for Zebra labels (direct thermal has no tape
+  color), reducing columns and the text wrapping that caused.
+- Tightened wrapping in the Label Format hint.
+
 ## 2.9.14 — Fix inaccessible items + printer panel disappearing
 
 - **All items are reachable again.** Items whose category pointed at a category
