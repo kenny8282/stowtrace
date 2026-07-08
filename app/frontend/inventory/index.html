@@ -4852,9 +4852,29 @@ async function refreshItems() {
     const data = await r.json();
     state.items = data.items || [];
     renderLists();
+    // Re-render whatever the user is currently looking at, so changes appear
+    // immediately without a manual page refresh.
+    rerenderCurrentView();
   } catch(e) {
     toast('Failed to load items', 'red');
   }
+}
+
+// Re-render the active tab's view in place (no full page reload). Called after
+// any data change so the UI stays in sync seamlessly.
+function rerenderCurrentView() {
+  const tab = state.currentTab;
+  try {
+    if (tab === 'categories') { if (typeof renderCategoriesTab === 'function') renderCategoriesTab(); }
+    else if (tab === 'locations') { if (typeof renderLocationsTab === 'function') renderLocationsTab(); }
+    else if (tab === 'admin') {
+      // Don't rebuild the admin panel if the user is actively typing in it
+      // (would blow away focus / partial input).
+      const active = document.activeElement;
+      const inAdmin = active && active.closest && active.closest('#tab-admin');
+      if (!inAdmin && typeof renderAdminTab === 'function') renderAdminTab();
+    }
+  } catch (e) { /* never let a re-render break the data refresh */ }
 }
 
 async function refreshLocations() {
@@ -6012,7 +6032,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.12';
+const FRONTEND_BUILD = '2.9.13';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
