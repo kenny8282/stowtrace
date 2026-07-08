@@ -3,6 +3,27 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.12 — Restore merges instead of duplicating + forge tape-width panel
+
+**Restore fixes (important):**
+- Restoring a backup no longer creates duplicate categories. Categories are now
+  merged by their name-path rather than their random internal id, so a category
+  that already exists is reused instead of copied. Restored items are remapped to
+  the existing category.
+- Items merge instead of overwriting: an item already present is kept (current
+  wins), and missing fields like category are backfilled from the backup. Items
+  not present are added. Re-running a restore is now idempotent — it adds nothing
+  the second time and never duplicates.
+- New healing step on startup de-duplicates any categories that were already
+  doubled by the earlier restore bug, repointing items to the surviving category.
+  Runs automatically; no-op once the tree is clean.
+
+**Label Forge:**
+- The Brother tape-width control moved into a "Brother Tape" panel below the
+  header (above Label Format), matching where the Zebra label-size selector sits —
+  no more cramped controls next to the printer name.
+- The selected printer persists across page changes and reloads (saved per box).
+
 ## 2.9.11 — Label Forge adapts to the selected printer
 
 Label Forge now reshapes itself to match whichever printer is selected, fixing the
