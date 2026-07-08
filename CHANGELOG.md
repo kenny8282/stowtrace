@@ -3,6 +3,12 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.18 — Thumbnails in the category tree
+
+Item rows in the Categories tab now show a photo thumbnail on the left, the same as
+the search results. Items with a photo show it; items without show a subtle box
+placeholder. Thumbnails load lazily so large categories stay fast.
+
 ## 2.9.17 — Back button works from the Needs Photo tab
 
 Opening an item from the Needs Photo tab and tapping Back now returns to the Needs
