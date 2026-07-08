@@ -2513,6 +2513,9 @@ function _captureNavOrigin() {
   if (tab === 'unassigned') {
     return { tab, search: (el('unassignedSearch')?.value || '') };
   }
+  if (tab === 'needsphoto') {
+    return { tab, search: (el('needsPhotoSearch')?.value || '') };
+  }
   if (tab === 'scan') {
     // Came from the top search bar (results list) — remember the query.
     return { tab: 'search', search: (el('topSearch')?.value || '') };
@@ -2540,6 +2543,10 @@ function goBackFromDetail() {
   } else if (origin.tab === 'unassigned') {
     switchTab('unassigned');
     if (el('unassignedSearch')) el('unassignedSearch').value = origin.search || '';
+    renderLists();
+  } else if (origin.tab === 'needsphoto') {
+    switchTab('needsphoto');
+    if (el('needsPhotoSearch')) el('needsPhotoSearch').value = origin.search || '';
     renderLists();
   } else if (origin.tab === 'search') {
     // Restore the top search with its query and re-show the full results list.
@@ -6092,7 +6099,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.16';
+const FRONTEND_BUILD = '2.9.17';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
