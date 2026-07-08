@@ -1131,6 +1131,9 @@
   <div id="printerStatus" class="printer-status">
     <span class="dot" id="printerDot"></span>
     <span class="label">PRINTER:</span>
+    <select id="printerSelect" class="override-sel" onchange="onPrinterSelectChange()" title="Choose which printer to use" style="margin-right:6px;">
+      <option value="">loading…</option>
+    </select>
     <span id="printerText">checking…</span>
     <button class="printer-refresh" onclick="refreshPrinterStatus()" title="Refresh printer status">↻</button>
     <!-- Slice 4: manual override for preview when no printer is connected.
@@ -4019,7 +4022,72 @@ function renderPrinterStatusText(d) {
   }
 }
 
+/* ---- Printer selection (universal driver system) ---- */
+let _printers = [];
+let _selectedPrinterCaps = null;
+
+async function loadPrinters() {
+  try {
+    const r = await fetch('/api/printers', { cache: 'no-store' });
+    const d = await r.json();
+    _printers = d.printers || [];
+    const sel = el('printerSelect');
+    if (sel) {
+      sel.innerHTML = _printers.map(p => {
+        const dot = p.connected ? '🟢' : '🔴';
+        return `<option value="${p.id}" ${p.selected ? 'selected' : ''}>${dot} ${p.display_name}</option>`;
+      }).join('');
+    }
+    const selected = _printers.find(p => p.selected) || _printers[0];
+    _selectedPrinterCaps = selected ? selected.capabilities : null;
+    applyPrinterCapabilities(_selectedPrinterCaps, selected);
+  } catch (e) {
+    const sel = el('printerSelect');
+    if (sel) sel.innerHTML = '<option value="">(printer list unavailable)</option>';
+  }
+}
+
+async function onPrinterSelectChange() {
+  const sel = el('printerSelect');
+  if (!sel || !sel.value) return;
+  try {
+    await fetch('/api/printers/select', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: sel.value }),
+    });
+  } catch (e) { /* non-fatal */ }
+  refreshPrinterStatus();
+}
+
+// Show/hide printer-specific controls based on the selected driver's declared
+// capabilities. Brother shows tape options; Zebra shows a label-size preset.
+function applyPrinterCapabilities(caps, printer) {
+  if (!caps) return;
+  const shows = caps.show_options || [];
+  let zebraWrap = el('zebraSizeWrap');
+  if (shows.includes('size_preset')) {
+    if (!zebraWrap) {
+      const host = el('printerStatus');
+      zebraWrap = document.createElement('span');
+      zebraWrap.id = 'zebraSizeWrap';
+      zebraWrap.className = 'override-wrap';
+      zebraWrap.style.marginLeft = '4px';
+      const presets = (caps.size_presets || []).map(s =>
+        `<option value="${s.id}">${s.label}</option>`).join('');
+      zebraWrap.innerHTML = `<span class="override-sep">·</span>
+        <span class="label" style="font-size:10px;">LABEL SIZE:</span>
+        <select id="zebraSizeSel" class="override-sel">${presets}</select>`;
+      if (host) host.appendChild(zebraWrap);
+    }
+    zebraWrap.style.display = '';
+  } else if (zebraWrap) {
+    zebraWrap.style.display = 'none';
+  }
+}
+
 async function refreshPrinterStatus() {
+  // Also refresh the printer list/dropdown so connection dots stay current.
+  loadPrinters();
   const dot = el('printerDot'); const text = el('printerText');
   const btn = document.querySelector('.printer-refresh');
   if (!dot || !text) return;
