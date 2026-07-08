@@ -74,6 +74,12 @@
     align-self: flex-start;
   }
   header .home-link:hover { color: var(--ink); border-color: var(--ink); }
+  header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+  }
   header .gear-btn {
     font-size: 18px;
     line-height: 1;
@@ -942,10 +948,11 @@
     grid-template-columns: 1fr 1fr;
     height: 60px;
     box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
-    /* Keep the bar pinned to the layout viewport so pinch-zoom doesn't push it
-       off-screen or shrink it. */
     width: 100%;
-    max-width: 100vw;
+    /* Positioned each frame via JS (visualViewport) so it stays pinned to the
+       VISIBLE area even during pinch-zoom, instead of scrolling off-screen. */
+    transform-origin: bottom left;
+    will-change: transform;
   }
   .nav-btn {
     background: var(--ink);
@@ -978,7 +985,7 @@
   /* ---- STICKY PRINT BAR (above bottom nav) ---- */
   .sticky-print {
     position: fixed;
-    bottom: 60px;   /* sits right above the bottom nav */
+    bottom: 0;   /* JS lifts it above the 60px nav (scaled) via transform */
     left: 0; right: 0;
     z-index: 99;
     background: var(--paper);
@@ -989,6 +996,8 @@
     align-items: center;
     flex-wrap: wrap;
     box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+    transform-origin: bottom left;
+    will-change: transform;
   }
   .sticky-print.visible { display: flex; }
   .sticky-print .summary {
@@ -1146,7 +1155,10 @@
 
   <!-- HEADER -->
   <header>
-    <a href="/" class="home-link">← Home</a>
+    <div class="header-left">
+      <a href="/" class="home-link">← Home</a>
+      <button class="gear-btn" data-tab="registry" title="Settings" aria-label="Settings">⚙</button>
+    </div>
     <h1>
       <a href="/">LABEL <span class="accent">//</span> FORGE</a>
       <small>BATCH LABEL MAKER · UNIQUE-ID INVENTORY · v1 SCHEMA</small>
@@ -1157,7 +1169,6 @@
       <div>ISSUED: <span class="stat" id="usedCount">0</span> codes</div>
       <div>QUEUE: <span class="stat" id="queueCount">0</span> labels</div>
     </div>
-    <button class="gear-btn" data-tab="registry" title="Settings" aria-label="Settings">⚙</button>
   </header>
 
   <!-- Printer status strip — only shown in Label Maker tab -->
@@ -4348,6 +4359,39 @@ async function refreshPrinterStatus() {
 }
 
 /* ---- INIT ---- */
+// Keep the fixed bottom nav (and sticky print bar) pinned to the VISIBLE
+// viewport during pinch-zoom. Without this, mobile browsers glue position:fixed
+// elements to the layout viewport, so they scroll off-screen when zoomed in.
+function _pinBottomBarsToViewport() {
+  const vv = window.visualViewport;
+  const nav = document.querySelector('.bottom-nav');
+  const sticky = document.querySelector('.sticky-print');
+  if (!vv || !nav) return;
+  // Offset from the layout-viewport bottom to the visible-viewport bottom.
+  const bottomGap = (document.documentElement.clientHeight) - (vv.height + vv.offsetTop);
+  // Counter-scale so the bar keeps a constant on-screen size regardless of zoom,
+  // and shift it up so it hugs the bottom of what the user can actually see.
+  const scale = 1 / vv.scale;
+  const tx = vv.offsetLeft;
+  const ty = -bottomGap;
+  const transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  nav.style.transform = transform;
+  nav.style.width = vv.width + 'px';
+  if (sticky) {
+    // Sticky print sits directly above the 60px nav; lift it by the scaled nav
+    // height so the two stay stacked and constant-size during zoom.
+    sticky.style.transform = `translate(${tx}px, ${ty - (60 * scale)}px) scale(${scale})`;
+    sticky.style.width = vv.width + 'px';
+    sticky.style.transformOrigin = 'bottom left';
+  }
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', _pinBottomBarsToViewport);
+  window.visualViewport.addEventListener('scroll', _pinBottomBarsToViewport);
+  window.addEventListener('scroll', _pinBottomBarsToViewport, { passive: true });
+}
+
 (async function init() {
   setupListeners();
   toggleUrlField();
@@ -4357,6 +4401,7 @@ async function refreshPrinterStatus() {
   _upgradeToApiIfAvailable();
   refreshPrinterStatus();
   setInterval(refreshPrinterStatus, 30000);
+  _pinBottomBarsToViewport();
 })();
 </script>
 </body>
