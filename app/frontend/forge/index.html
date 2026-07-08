@@ -1136,20 +1136,6 @@
     </select>
     <span id="printerText">checking…</span>
     <button class="printer-refresh" onclick="refreshPrinterStatus()" title="Refresh printer status">↻</button>
-    <!-- Slice 4: manual override for preview when no printer is connected.
-         Disabled (visually grayed) when a printer IS connected — cartridge always wins. -->
-    <span class="override-wrap" id="overrideWrap" style="display:none;">
-      <span class="override-sep">·</span>
-      <span class="label" style="font-size:10px;">PREVIEW AS:</span>
-      <select id="tapeOverrideSel" class="override-sel">
-        <option value="">— off —</option>
-        <option value="6">6 mm</option>
-        <option value="9">9 mm</option>
-        <option value="12" selected>12 mm</option>
-        <option value="18">18 mm</option>
-        <option value="24">24 mm</option>
-      </select>
-    </span>
   </div>
 
   <!-- ============================================================ -->
@@ -1241,6 +1227,13 @@
 
       <!-- LEFT: config for tape -->
       <div>
+
+        <!-- PRINTER OPTIONS — printer-specific controls (tape width for Brother,
+             label size for Zebra). Populated by applyPrinterCapabilities(). -->
+        <div class="panel" id="printerOptionsPanel" style="display:none;">
+          <h2><span id="printerOptionsTitle">Printer Options</span></h2>
+          <div id="printerOptionsBody"></div>
+        </div>
 
         <!-- LABEL FORMAT (Label Maker) — W, H, Color for next row -->
         <div class="panel">
@@ -3993,12 +3986,9 @@ let _lastPrinterStatus = null;
    - Connected: hide entirely (cartridge wins; no manual override needed).
    - Disconnected: show, so the user can pick a tape size for preview. */
 function updateOverrideVisibility() {
-  const wrap = el('overrideWrap'); if (!wrap) return;
-  // The tape-width "Preview as" override is Brother-only. Never show it for a
-  // die-cut printer (Zebra) — that printer has its own label-size selector.
-  if (_printerMode === 'diecut') { wrap.style.display = 'none'; return; }
-  const connected = !!(_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm);
-  wrap.style.display = connected ? 'none' : '';
+  // Obsolete: tape-width control now lives in the printer-options panel, managed
+  // by applyPrinterCapabilities(). Kept as a no-op for existing call sites.
+  return;
 }
 
 /* Slice 4: When disconnected and an override is set, surface it in the status text. */
@@ -4109,44 +4099,68 @@ function activeDiecutDims() {
   return id ? zebraPresetDims(id) : null;
 }
 
-// Show/hide printer-specific controls + reshape the Label Format section to
-// match the selected printer. Brother = tape (width chosen, length from content);
-// Zebra = die-cut (fixed size preset drives both dimensions).
+// Build the printer-options panel (below the header, above Label Format) to
+// match the selected printer: Brother -> tape width; Zebra -> label size.
 function applyPrinterCapabilities(caps, printer) {
   if (!caps) return;
   _printerCaps = caps;
   _printerMode = (caps.media === 'die_cut_roll') ? 'diecut' : 'tape';
-  const shows = caps.show_options || [];
 
-  // --- Brother tape-override cluster (the "N. ↻ 24mm" strip): tape mode only.
-  const overrideWrap = el('overrideWrap');
-  if (overrideWrap) overrideWrap.style.display = (_printerMode === 'tape') ? '' : 'none';
+  const panel = el('printerOptionsPanel');
+  const title = el('printerOptionsTitle');
+  const bodyEl = el('printerOptionsBody');
+  if (!panel || !bodyEl) { reshapeLabelFormatForPrinter(); return; }
 
-  // --- Zebra size-preset selector in the printer strip.
-  let zebraWrap = el('zebraSizeWrap');
-  if (shows.includes('size_preset')) {
-    if (!zebraWrap) {
-      const host = el('printerStatus');
-      zebraWrap = document.createElement('span');
-      zebraWrap.id = 'zebraSizeWrap';
-      zebraWrap.className = 'override-wrap';
-      zebraWrap.style.marginLeft = '4px';
-      const presets = (caps.size_presets || []).map(s =>
-        `<option value="${s.id}">${s.label}</option>`).join('');
-      zebraWrap.innerHTML = `<span class="override-sep">·</span>
-        <span class="label" style="font-size:10px;">LABEL SIZE:</span>
-        <select id="zebraSizeSel" class="override-sel" onchange="onZebraSizeChange()">${presets}</select>`;
-      if (host) host.appendChild(zebraWrap);
-    }
-    zebraWrap.style.display = '';
-  } else if (zebraWrap) {
-    zebraWrap.style.display = 'none';
+  if (_printerMode === 'diecut') {
+    title.textContent = 'Zebra Label Size';
+    const presets = (caps.size_presets || []).map(s =>
+      `<option value="${s.id}">${s.label}</option>`).join('');
+    bodyEl.innerHTML = `
+      <div class="hint" style="margin-top:0;margin-bottom:8px;">
+        Direct-thermal die-cut labels. Pick the label size loaded in the Zebra —
+        it sets the label dimensions for new rows.
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Label size</label>
+        <select id="zebraSizeSel" onchange="onZebraSizeChange()">${presets}</select>
+      </div>`;
+  } else {
+    title.textContent = 'Brother Tape';
+    bodyEl.innerHTML = `
+      <div class="hint" style="margin-top:0;margin-bottom:8px;">
+        The tape width is the label <b>height</b>. Length is set per row by the
+        label content. When a printer is connected the loaded cartridge is used;
+        otherwise pick a width here to preview.
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Tape width (preview)</label>
+        <select id="tapeOverrideSel" onchange="onTapeWidthChange()">
+          <option value="">— use connected cartridge —</option>
+          <option value="6">6 mm</option>
+          <option value="9">9 mm</option>
+          <option value="12">12 mm</option>
+          <option value="18">18 mm</option>
+          <option value="24">24 mm</option>
+        </select>
+      </div>`;
+    // Restore any previously-set override value.
+    const sel = el('tapeOverrideSel');
+    if (sel && state.tapeOverrideMm) sel.value = String(state.tapeOverrideMm);
   }
+  panel.style.display = '';
 
   reshapeLabelFormatForPrinter();
-  // Re-render preview + table so mode change takes effect immediately.
   if (typeof renderTable === 'function') renderTable('maker');
   if (typeof schedulePreview === 'function') schedulePreview();
+}
+
+// Brother tape-width change (preview override).
+function onTapeWidthChange() {
+  const sel = el('tapeOverrideSel');
+  state.tapeOverrideMm = sel && sel.value ? sel.value : null;
+  if (typeof persistConfig === 'function') persistConfig();
+  renderTable('maker');
+  schedulePreview();
 }
 
 // When the Zebra label size changes, update the row defaults + preview.
