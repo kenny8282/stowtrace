@@ -87,6 +87,29 @@
     font-family: 'Archivo', sans-serif;
   }
   header .home-link:hover { color: var(--ink); border-color: var(--ink); }
+  header .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  header .gear-btn {
+    font-size: 18px;
+    line-height: 1;
+    width: 34px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  header .gear-btn:hover { color: var(--ink); border-color: var(--ink); }
+  header .gear-btn.active { color: var(--ink); border-color: var(--ink); background: rgba(0,0,0,0.04); }
 
   /* ---- TABS ---- */
   .tabs {
@@ -1253,7 +1276,10 @@
   <!-- HEADER -->
   <header>
     <h1><a href="/">INVENTORY</a></h1>
-    <a href="/" class="home-link">← Home</a>
+    <div class="header-actions">
+      <button class="gear-btn" onclick="switchTab('admin')" title="Settings" aria-label="Settings">⚙</button>
+      <a href="/" class="home-link">← Home</a>
+    </div>
   </header>
 
   <!-- TABS -->
@@ -1263,7 +1289,6 @@
     <button class="tab" data-tab="locations">Locations</button>
     <button class="tab" data-tab="unassigned">Unassigned <span id="unassignedBadge" class="tab-badge"></span></button>
     <button class="tab" data-tab="needsphoto">Needs Photo <span id="needsPhotoBadge" class="tab-badge"></span></button>
-    <button class="tab" data-tab="admin">⚙</button>
   </div>
 
   <!-- SCAN TAB -->
@@ -1719,6 +1744,9 @@ function switchTab(name) {
   }
   state.currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  // The Settings gear (top-right) stands in for the admin tab button.
+  const gear = document.querySelector('.gear-btn');
+  if (gear) gear.classList.toggle('active', name === 'admin');
   document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'tab-' + name));
 
   if (name !== 'scan') {
