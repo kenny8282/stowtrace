@@ -1239,7 +1239,7 @@
         <div class="panel">
           <h2><span>Label Format</span><span class="num">NEW</span></h2>
           <div class="hint" style="margin-top:0;margin-bottom:8px;">
-            These are the defaults for <b>the next row</b> you add below. Existing rows keep their dimensions and color — change them in the table if you need to.
+            Defaults for <b>new rows</b>. Existing rows keep their settings — edit them in the table below.
           </div>
           <div class="row">
             <div class="field" style="margin-bottom: 0;">
@@ -1285,6 +1285,8 @@
 
         <!-- TABLE -->
         <div class="panel" style="padding: 14px;">
+          <h2><span id="labelRowsTitle">Labels</span></h2>
+          <div id="otherPrinterNote" style="display:none;font-size:11px;color:var(--muted);margin:0 0 8px;"></div>
           <div class="toolbar">
             <button data-table="maker" class="add-row-btn">+ Add Row</button>
             <button data-table="maker" class="add-blank-rows-btn secondary">+ 5 Rows</button>
@@ -1308,7 +1310,7 @@
                   <th style="width: 50px;">QR</th>
                   <th style="width: 60px;">Copies</th>
                   <th class="size-cell">W × H (mm)</th>
-                  <th style="width: 110px;">Tape Color</th>
+                  <th class="col-tapecolor" style="width: 110px;">Tape Color</th>
                   <th style="width: 80px;">Format</th>
                   <th style="width: 90px;"></th>
                 </tr>
@@ -1974,6 +1976,7 @@ async function addRow(tabName, opts = {}) {
     w: rowW, h: rowH,
     color,             // Slice 3: per-row color (Label Maker only)
     formatName: opts.formatName || 'custom',
+    printerType: opts.printerType || (tabName === 'maker' ? (_printerMode === 'diecut' ? 'zebra' : 'brother') : null),
     isReprint: !!opts.isReprint,   // Slice 5: marks rows that came from QR scan
     selected: false,
     created: new Date().toISOString(),
@@ -2224,26 +2227,71 @@ function fitTextLines(textBlock, lineEls, boxW, boxH) {
 }
 
 /* ---- TABLE RENDERING (one renderer for both tabs) ---- */
+
+// Update the "Labels" title + the note about labels for the other printer.
+function _updateOtherPrinterNote(hiddenCount, activeType) {
+  const title = el('labelRowsTitle');
+  if (title) title.textContent = (activeType === 'zebra') ? 'Zebra Labels' : 'Brother Labels';
+  const note = el('otherPrinterNote');
+  if (!note) return;
+  if (hiddenCount > 0) {
+    const other = (activeType === 'zebra') ? 'Brother' : 'Zebra';
+    note.textContent = `${hiddenCount} ${other} label${hiddenCount===1?'':'s'} hidden — switch the printer above to see ${hiddenCount===1?'it':'them'}.`;
+    note.style.display = '';
+  } else {
+    note.style.display = 'none';
+  }
+}
+
+// Show/hide the Tape Color column (header + cells) for the maker table.
+function _applyColorColumnVisibility(tabName, show) {
+  if (tabName !== 'maker') return;
+  const table = el('makerTable');
+  if (!table) return;
+  const disp = show ? '' : 'none';
+  table.querySelectorAll('.col-tapecolor, td.color-cell').forEach(c => { c.style.display = disp; });
+}
+
 function renderTable(tabName) {
   const ts = getTabState(tabName); if (!ts) return;
   const tb = el(tabName + 'Body'); if (!tb) return;
   tb.innerHTML = '';
-  // Number of columns varies: Label Maker has a Tape Color column (11), Printer doesn't (10)
-  const colCount = (tabName === 'maker') ? 11 : 10;
-  if (ts.rows.length === 0) {
+
+  // Label Maker: show only rows for the currently-selected printer type, so the
+  // table stays uncluttered. Rows for the other printer still exist (and can be
+  // seen by switching printers) — we surface a count of them below.
+  const activeType = (tabName === 'maker')
+    ? (_printerMode === 'diecut' ? 'zebra' : 'brother') : null;
+  let allRows = ts.rows;
+  let visibleRows = ts.rows;
+  let hiddenOther = 0;
+  if (tabName === 'maker') {
+    visibleRows = ts.rows.filter(r => {
+      const rt = r.printerType || 'brother';   // legacy rows default to Brother
+      return rt === activeType;
+    });
+    hiddenOther = ts.rows.length - visibleRows.length;
+    _updateOtherPrinterNote(hiddenOther, activeType);
+  }
+
+  // Number of columns varies. Zebra has no Tape Color column.
+  const isZebra = (tabName === 'maker' && _printerMode === 'diecut');
+  const colCount = (tabName !== 'maker') ? 10 : (isZebra ? 10 : 11);
+  _applyColorColumnVisibility(tabName, !isZebra);
+
+  if (visibleRows.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="${colCount}"><div class="table-empty">No rows. Click <b>+ Add Row</b> to begin.</div></td>`;
+    const msg = (tabName === 'maker' && hiddenOther > 0)
+      ? `No labels for the selected printer. ${hiddenOther} label${hiddenOther===1?'':'s'} for the other printer ${hiddenOther===1?'is':'are'} hidden — switch printers to see ${hiddenOther===1?'it':'them'}.`
+      : 'No rows. Click <b>+ Add Row</b> to begin.';
+    tr.innerHTML = `<td colspan="${colCount}"><div class="table-empty">${msg}</div></td>`;
     tb.appendChild(tr);
     return;
   }
 
-  // Slice 4: a Maker row is "printable" if its h matches the active tape height
-  // (loaded cartridge if connected, else manual override if set, else no active height).
-  // Mismatch rows are visually tinted but their checkbox stays interactive — users
-  // can still duplicate/delete them. Preview and print paths filter them out.
   const activeTapeH = (tabName === 'maker') ? getActiveTapeHeight() : null;
 
-  ts.rows.forEach(row => {
+  visibleRows.forEach(row => {
     const tr = document.createElement('tr');
     tr.dataset.uid = row.uid;
 
@@ -2466,7 +2514,9 @@ function renderMakerPreview() {
   // Slice 4: preview shows only selected rows whose height matches the active tape.
   // Active tape = connected cartridge OR manual override. If neither set, empty.
   const activeH = getActiveTapeHeight();
-  const selected = state.maker.rows.filter(r => r.selected);
+  const activeType = (_printerMode === 'diecut') ? 'zebra' : 'brother';
+  const selected = state.maker.rows.filter(r =>
+    r.selected && (r.printerType || 'brother') === activeType);
   let printable = [];
   if (activeH !== null) {
     printable = selected.filter(r => Math.abs(r.h - activeH) < 0.01);
@@ -3771,7 +3821,13 @@ function updateStickyPrint() {
   const total = ts.rows.length;
   if (total === 0) { bar.classList.remove('visible'); document.body.classList.remove('has-sticky-print'); return; }
 
-  const selectedRows = ts.rows.filter(r => r.selected);
+  let selectedRows = ts.rows.filter(r => r.selected);
+  // On the maker tab, only count rows for the currently-selected printer — rows
+  // for the other printer are hidden and shouldn't affect the print summary.
+  if (tab === 'maker') {
+    const activeType = (_printerMode === 'diecut') ? 'zebra' : 'brother';
+    selectedRows = selectedRows.filter(r => (r.printerType || 'brother') === activeType);
+  }
   const selCount = selectedRows.length;
 
   let summaryHtml, btnHtml;
