@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.9"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.10"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -2409,14 +2409,47 @@ def system_restore():
 
 
 # ------------------------------------------------------------------
-# Printer integration (Brother P-Touch via ptouch-print)
 # ------------------------------------------------------------------
+# Printer subsystem — universal driver architecture
+# ------------------------------------------------------------------
+# Each physical printer family is a "driver" implementing a common interface.
+# Drivers are registered in _PRINTER_DRIVERS. The API exposes the full list
+# (so every known printer shows in the UI even when unplugged), reports
+# per-driver connection status (the red/green light), and routes print jobs
+# to the selected driver. Adding a new printer later = add one driver class.
+#
+# Common driver interface (see BrotherPTouchDriver / ZebraZD411Driver):
+#   .id              short stable id, e.g. "brother_ptouch"
+#   .display_name    human name for the dropdown
+#   .capabilities()  dict describing media + which UI options to show
+#   .status()        {connected: bool, model?, error?, ...}  (red/green light)
+#   .print(pngs, copies, options) -> (ok: bool, result: dict, http_status)
+#
+# The label CONTENT is rendered to PNG by the frontend (printer-agnostic).
+# Brother sends the PNG via ptouch-print; Zebra sends it via CUPS (lp).
 
 PTOUCH_BIN = os.environ.get("PTOUCH_BIN", "/usr/local/bin/ptouch-print")
 
 
+class PrinterDriver:
+    """Base class. Subclasses implement the methods below."""
+    id = "base"
+    display_name = "Printer"
+
+    def capabilities(self):
+        return {}
+
+    def status(self):
+        return {"connected": False}
+
+    def print(self, png_paths, copies, options):
+        return False, {"error": "not implemented"}, 500
+
+
+# ---- Brother P-Touch (tape) ----------------------------------------------
+
 def _ptouch_info():
-    """Query the printer for its current state. Returns dict or None if no printer."""
+    """Query the Brother printer for its current state."""
     if not os.path.exists(PTOUCH_BIN):
         return {"error": "ptouch-print not installed", "connected": False}
     try:
@@ -2432,9 +2465,6 @@ def _ptouch_info():
     out = (result.stdout or "") + "\n" + (result.stderr or "")
     info = {"connected": False, "raw": out.strip()}
 
-    # Detect "no printer" states across ptouch-print versions:
-    #   v1.5 - "No printers found"
-    #   v1.8 - "No P-Touch printer found on USB (remember to put switch to position E)"
     no_printer_phrases = [
         "no p-touch printer found",
         "no printers found",
@@ -2445,15 +2475,10 @@ def _ptouch_info():
 
     if is_missing:
         info["connected"] = False
-        # Friendly hint for the most common cause
         if "switch to position" in out_lower or "plite" in out_lower:
             info["hint"] = "Hold the PLite button on the printer for ~2 seconds — the green LED should turn OFF"
         return info
 
-    # Connected detection — accept any of these markers:
-    #   v1.5: "PT-XYZ found on USB bus 1, device 4"
-    #   v1.8: "printer has 180 dpi, maximum printing width is 128 px"
-    #   v1.8 also: "maximum printing width for this tape is 76px"
     connected_markers = [
         "found on usb",
         "maximum printing width",
@@ -2463,24 +2488,19 @@ def _ptouch_info():
     if any(m in out_lower for m in connected_markers):
         info["connected"] = True
 
-    # Parse details from the output
     for line in out.splitlines():
         line = line.strip()
-        # v1.5 model line: "PT-P700 found on USB bus 1, device 8"
         if "found on USB" in line:
             parts = line.split(" found on USB")
             if parts and parts[0].strip():
                 info["model"] = parts[0].strip()
-        # Tape width — appears in both versions
         if line.startswith("media width"):
             try:
                 mm = int(line.split("=")[1].strip().split()[0])
                 info["tape_width_mm"] = mm
             except Exception:
                 pass
-        # Tape printable width in pixels — v1.8 phrasing
         if "maximum printing width for this tape" in line.lower():
-            # e.g. "maximum printing width for this tape is 76px"
             try:
                 import re
                 m = re.search(r"(\d+)\s*px", line)
@@ -2488,7 +2508,6 @@ def _ptouch_info():
                     info["max_print_px"] = int(m.group(1))
             except Exception:
                 pass
-        # Or older style: "max width = 70 px"
         elif line.startswith("max width"):
             try:
                 px = int(line.split("=")[1].strip().split()[0])
@@ -2499,19 +2518,14 @@ def _ptouch_info():
             info["tape_color"] = line.split("=")[1].strip()
         if line.startswith("text color"):
             info["text_color"] = line.split("=")[1].strip()
-        # Error code — flag only if non-zero
         if line.lower().startswith("error"):
             err = line.split("=")[1].strip() if "=" in line else ""
-            # Strip 0x prefix and accept either "0000" or "0x0000" as OK
             err_clean = err.lower().replace("0x", "").strip()
             if err_clean and err_clean != "0000" and err_clean != "0":
                 info["printer_error"] = err
                 info["connected"] = False
 
-    # If we still don't have a model name, try to extract one from the
-    # output. Fall back to a generic label.
     if info.get("connected") and not info.get("model"):
-        # Look for typical Brother model identifiers
         import re
         m = re.search(r"\bPT[-_]?[A-Z0-9]+\b", out)
         if m:
@@ -2525,27 +2539,263 @@ def _ptouch_info():
     return info
 
 
+class BrotherPTouchDriver(PrinterDriver):
+    id = "brother_ptouch"
+    display_name = "Brother P-Touch (tape)"
+
+    def capabilities(self):
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "media": "continuous_tape",   # fixed height (tape width), variable length
+            "render_modes": ["png"],
+            # Which option controls the UI should show for this printer:
+            "show_options": ["tape_width", "tape_color"],
+            "size_presets": [],           # tape width is auto-detected, not chosen
+            "notes": "Continuous laminated tape. Width auto-detected from the cartridge.",
+        }
+
+    def status(self):
+        return _ptouch_info() or {"connected": False}
+
+    def print(self, png_paths, copies, options):
+        info = _ptouch_info()
+        if not info.get("connected"):
+            return False, {"error": "printer not connected", "detail": info}, 503
+        all_results = []
+        for c in range(copies):
+            for i, p in enumerate(png_paths):
+                cmd = [PTOUCH_BIN, "--image", p]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                all_results.append({
+                    "copy": c + 1, "label": i + 1, "cmd": " ".join(cmd),
+                    "returncode": r.returncode,
+                    "stdout": (r.stdout or "").strip(),
+                    "stderr": (r.stderr or "").strip(),
+                })
+                if r.returncode != 0:
+                    return False, {
+                        "error": "ptouch-print failed",
+                        "copy": c + 1, "label": i + 1, "results": all_results,
+                    }, 500
+        return True, {
+            "printer": info.get("model", "P-Touch"),
+            "tape_width_mm": info.get("tape_width_mm"),
+            "results": all_results,
+        }, 200
+
+
+# ---- Zebra ZD411 (die-cut thermal, via CUPS) -----------------------------
+
+# CUPS queue name that install.sh sets up for the Zebra. Overridable.
+ZEBRA_CUPS_QUEUE = os.environ.get("ZEBRA_CUPS_QUEUE", "zebra_zd411")
+# USB id for detection: Zebra Technologies vendor is 0x0a5f.
+ZEBRA_USB_VENDOR = "0a5f"
+
+# Standard direct-thermal label presets for the ZD411 (2.25in / 57mm wide media).
+# width/height in inches; the printer is fixed-width, variable-length.
+ZEBRA_SIZE_PRESETS = [
+    {"id": "2.25x1.25", "label": '2.25" × 1.25" (standard POS tag)', "w_in": 2.25, "h_in": 1.25},
+    {"id": "2.25x1.0",  "label": '2.25" × 1.0"',  "w_in": 2.25, "h_in": 1.0},
+    {"id": "2.25x0.75", "label": '2.25" × 0.75"', "w_in": 2.25, "h_in": 0.75},
+    {"id": "2.25x0.5",  "label": '2.25" × 0.5"',  "w_in": 2.25, "h_in": 0.5},
+    {"id": "2.25x2.0",  "label": '2.25" × 2.0"',  "w_in": 2.25, "h_in": 2.0},
+]
+
+
+def _zebra_usb_present():
+    """True if a Zebra USB device is currently plugged in (lsusb vendor match)."""
+    try:
+        r = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5)
+        return ZEBRA_USB_VENDOR in (r.stdout or "").lower()
+    except Exception:
+        return False
+
+
+def _cups_queue_ready(queue):
+    """True if the given CUPS queue exists and isn't disabled."""
+    try:
+        r = subprocess.run(["lpstat", "-p", queue], capture_output=True, text=True, timeout=5)
+        out = (r.stdout or "").lower()
+        # "printer zebra_zd411 is idle" / "now printing" => ready; "disabled" => not
+        return r.returncode == 0 and "unknown" not in out and "disabled" not in out
+    except Exception:
+        return False
+
+
+def _zebra_info():
+    """Status for the Zebra: connected if the USB device is present AND a CUPS
+    queue is ready to accept jobs."""
+    usb = _zebra_usb_present()
+    queue_ready = _cups_queue_ready(ZEBRA_CUPS_QUEUE)
+    info = {
+        "connected": bool(usb and queue_ready),
+        "usb_present": usb,
+        "cups_queue": ZEBRA_CUPS_QUEUE,
+        "cups_queue_ready": queue_ready,
+        "model": "Zebra ZD411",
+    }
+    if usb and not queue_ready:
+        info["hint"] = f"Zebra is plugged in but no ready CUPS queue named '{ZEBRA_CUPS_QUEUE}'. Run the printer setup."
+    elif not usb:
+        info["hint"] = "Zebra ZD411 not detected on USB."
+    return info
+
+
+class ZebraZD411Driver(PrinterDriver):
+    id = "zebra_zd411"
+    display_name = "Zebra ZD411 (POS tags)"
+
+    def capabilities(self):
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "media": "die_cut_roll",      # fixed width (2.25"), choose length
+            "render_modes": ["png"],      # native ZPL is a future upgrade
+            "show_options": ["size_preset"],
+            "size_presets": ZEBRA_SIZE_PRESETS,
+            "fixed_width_in": 2.25,
+            "dpi_options": [203, 300],
+            "default_dpi": 203,
+            "notes": "Direct-thermal die-cut labels. Fixed 2.25\" width; pick a length.",
+        }
+
+    def status(self):
+        return _zebra_info()
+
+    def print(self, png_paths, copies, options):
+        info = _zebra_info()
+        if not info.get("connected"):
+            return False, {"error": "Zebra not ready", "detail": info}, 503
+        queue = ZEBRA_CUPS_QUEUE
+        all_results = []
+        for c in range(copies):
+            for i, p in enumerate(png_paths):
+                # lp sends the PNG to CUPS; the Zebra/Raster driver converts it
+                # to thermal dots. -o fit-to-page keeps it within the media.
+                cmd = ["lp", "-d", queue, "-o", "fit-to-page", p]
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                except Exception as e:
+                    return False, {"error": f"lp failed: {e}"}, 500
+                all_results.append({
+                    "copy": c + 1, "label": i + 1, "cmd": " ".join(cmd),
+                    "returncode": r.returncode,
+                    "stdout": (r.stdout or "").strip(),
+                    "stderr": (r.stderr or "").strip(),
+                })
+                if r.returncode != 0:
+                    return False, {
+                        "error": "lp (CUPS) failed",
+                        "copy": c + 1, "label": i + 1, "results": all_results,
+                    }, 500
+        return True, {
+            "printer": "Zebra ZD411",
+            "cups_queue": queue,
+            "results": all_results,
+        }, 200
+
+
+# ---- Registry + selection -------------------------------------------------
+
+_PRINTER_DRIVERS = {
+    BrotherPTouchDriver.id: BrotherPTouchDriver(),
+    ZebraZD411Driver.id: ZebraZD411Driver(),
+}
+
+
+def _selected_printer_id():
+    """The user's chosen printer for this box (persisted in config). Falls back
+    to the first connected driver, else Brother."""
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    sel = cfg.get("selected_printer") if isinstance(cfg, dict) else None
+    if sel in _PRINTER_DRIVERS:
+        return sel
+    # Auto-pick a connected one as a sensible default.
+    for pid, drv in _PRINTER_DRIVERS.items():
+        try:
+            if drv.status().get("connected"):
+                return pid
+        except Exception:
+            pass
+    return BrotherPTouchDriver.id
+
+
+def _set_selected_printer(pid):
+    if pid not in _PRINTER_DRIVERS:
+        return False
+    try:
+        cfg = json.loads(_read_file("st:config") or "{}")
+    except Exception:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["selected_printer"] = pid
+    _write_file("st:config", json.dumps(cfg))
+    return True
+
+
+@app.route("/api/printers", methods=["GET"])
+def list_printers():
+    """All known printers (connected or not) + which one is selected. Drives the
+    printer dropdown and the red/green status lights."""
+    selected = _selected_printer_id()
+    out = []
+    for pid, drv in _PRINTER_DRIVERS.items():
+        try:
+            st = drv.status()
+        except Exception as e:
+            st = {"connected": False, "error": str(e)}
+        caps = drv.capabilities()
+        out.append({
+            "id": pid,
+            "display_name": drv.display_name,
+            "connected": bool(st.get("connected")),
+            "status": st,
+            "capabilities": caps,
+            "selected": (pid == selected),
+        })
+    return jsonify({"printers": out, "selected": selected})
+
+
+@app.route("/api/printers/select", methods=["POST"])
+def select_printer():
+    """Set the active printer for this box."""
+    body = request.get_json(silent=True) or {}
+    pid = body.get("id")
+    if not _set_selected_printer(pid):
+        return jsonify({"ok": False, "error": "unknown printer id"}), 400
+    return jsonify({"ok": True, "selected": pid})
+
+
 @app.route("/api/printer/status", methods=["GET"])
 def printer_status():
-    """Returns the current state of the connected tape printer."""
-    info = _ptouch_info() or {"connected": False}
+    """Status of a printer. Defaults to the selected one; ?id= overrides.
+    Kept backward-compatible: returns the status dict at the top level, so the
+    existing Brother UI (which reads .connected/.model/.tape_width_mm) still
+    works unchanged."""
+    pid = request.args.get("id") or _selected_printer_id()
+    drv = _PRINTER_DRIVERS.get(pid)
+    if not drv:
+        return jsonify({"connected": False, "error": "unknown printer"}), 404
+    info = drv.status() or {"connected": False}
+    # annotate which printer this is, without breaking existing fields
+    info.setdefault("printer_id", pid)
     return jsonify(info)
 
 
 @app.route("/api/print", methods=["POST"])
 def print_label():
-    """Print one or more labels to the tape printer.
+    """Print one or more labels to the selected printer.
 
-    Body (use one of these shapes):
-
-      Single label:
-        { "png_base64": "<data>", "copies": 1 }
-        -> ptouch-print --image label.png  (repeated `copies` times)
-
-      Batch (multiple different labels in one job):
-        { "pngs_base64": ["<data1>", "<data2>", ...], "copies": 1 }
-        -> ptouch-print --image l1.png --image l2.png --image l3.png
-        -> One front leader for the whole batch, auto-cut between each label.
+    Body:
+      { "png_base64": "<data>", "copies": 1 }                  single label
+      { "pngs_base64": ["<d1>", "<d2>", ...], "copies": 1 }    batch
+      Optional: "printer_id" to override the selected printer for this job,
+                "options" dict passed through to the driver.
     """
     body = request.get_json(silent=True) or {}
 
@@ -2553,7 +2803,6 @@ def print_label():
     if copies < 1 or copies > 50:
         abort(400, description="copies must be 1-50")
 
-    # Accept either single PNG or list of PNGs
     pngs_b64 = body.get("pngs_base64")
     single_b64 = body.get("png_base64")
 
@@ -2570,7 +2819,13 @@ def print_label():
     if len(png_list) > 100:
         abort(400, description="too many labels in batch (max 100)")
 
-    # Decode each PNG, write to its own temp file
+    # Resolve the driver (explicit override or the box's selected printer).
+    pid = body.get("printer_id") or _selected_printer_id()
+    drv = _PRINTER_DRIVERS.get(pid)
+    if not drv:
+        abort(400, description=f"unknown printer_id: {pid}")
+    options = body.get("options") or {}
+
     tmp_paths = []
     try:
         for idx, b64 in enumerate(png_list):
@@ -2588,68 +2843,11 @@ def print_label():
             t.close()
             tmp_paths.append(t.name)
 
-        # Pre-flight: confirm printer is connected
-        info = _ptouch_info()
-        if not info.get("connected"):
-            return jsonify({
-                "ok": False,
-                "error": "printer not connected",
-                "detail": info,
-            }), 503
-
-        # Cut strategy for the farixembedded ptouch-print fork:
-        #
-        # This fork doesn't have --precut. Cuts work like this:
-        #   - Every ptouch-print invocation feeds + auto-cuts at the END.
-        #   - --chain skips the final feed/cut so the next label can chain on.
-        #   - --cutmark prints a small mark where the user should manually cut.
-        #
-        # Best UX: print each label as its own invocation so each one gets a
-        # clean auto-cut at the end. The printer's mandatory 25mm leader only
-        # appears on the very first label of a print session (the printer
-        # remembers where it is on the tape). Multi-label batches can group
-        # multiple --image flags in one invocation for tighter packing, but
-        # that requires manual cutting between them via --cutmark.
-        #
-        # Single label:           ptouch-print --image L.png
-        #   -> prints L, auto-cuts at end
-        # Multiple discrete labels (each fully cut):
-        #   -> separate ptouch-print invocations per label
-
-        all_results = []
-        n = len(tmp_paths)
-        for c in range(copies):
-            for i, p in enumerate(tmp_paths):
-                cmd = [PTOUCH_BIN, "--image", p]
-                r = subprocess.run(
-                    cmd,
-                    capture_output=True, text=True,
-                    timeout=60,  # per-label; ptouch-print can take 5-10s
-                )
-                all_results.append({
-                    "copy": c + 1,
-                    "label": i + 1,
-                    "cmd": " ".join(cmd),
-                    "returncode": r.returncode,
-                    "stdout": (r.stdout or "").strip(),
-                    "stderr": (r.stderr or "").strip(),
-                })
-                if r.returncode != 0:
-                    return jsonify({
-                        "ok": False,
-                        "error": "ptouch-print failed",
-                        "copy": c + 1,
-                        "label": i + 1,
-                        "results": all_results,
-                    }), 500
-
-        return jsonify({
-            "ok": True,
-            "labels": len(png_list),
-            "copies": copies,
-            "printer": info.get("model", "unknown"),
-            "tape_width_mm": info.get("tape_width_mm"),
-        })
+        ok, result, http_status = drv.print(tmp_paths, copies, options)
+        payload = {"ok": ok, "labels": len(png_list), "copies": copies,
+                   "printer_id": pid}
+        payload.update(result if isinstance(result, dict) else {})
+        return jsonify(payload), (200 if ok else http_status)
     finally:
         for p in tmp_paths:
             try:
