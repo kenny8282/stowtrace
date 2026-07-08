@@ -3,6 +3,18 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.19 — Settings gear + steadier Label Forge bottom nav
+
+- Settings now lives as a gear icon in the top-right of both pages, next to Home —
+  consistent across Inventory and Label Forge. The old Settings tab (the inventory
+  top tab and the Label Forge bottom "Options" tab) are removed; the gear opens the
+  same panel.
+- Label Forge's bottom nav is now just the two view tabs (Label Maker / Printer),
+  spread evenly across the bottom.
+- Fixed the bottom nav jumping/shrinking on mobile: form inputs now use a 16px font
+  on small screens, which stops mobile browsers from auto-zooming when you tap a
+  field (the auto-zoom was what pushed the fixed bottom bar out of view).
+
 ## 2.9.18 — Thumbnails in the category tree
 
 Item rows in the Categories tab now show a photo thumbnail on the left, the same as
