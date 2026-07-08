@@ -1245,6 +1245,7 @@
     <button class="tab" data-tab="categories">Categories</button>
     <button class="tab" data-tab="locations">Locations</button>
     <button class="tab" data-tab="unassigned">Unassigned <span id="unassignedBadge" class="tab-badge"></span></button>
+    <button class="tab" data-tab="needsphoto">Needs Photo <span id="needsPhotoBadge" class="tab-badge"></span></button>
     <button class="tab" data-tab="admin">⚙</button>
   </div>
 
@@ -1340,6 +1341,18 @@
       </div>
       <input type="text" id="unassignedSearch" placeholder="Search unassigned…" style="margin-bottom:10px;">
       <div class="item-list" id="unassignedList"></div>
+    </div>
+  </div>
+
+  <!-- NEEDS PHOTO TAB — items missing a photo (pure filter, doesn't change category) -->
+  <div class="tab-content hidden" id="tab-needsphoto">
+    <div class="panel">
+      <h2>Needs Photo <span style="color:var(--muted);font-weight:500;font-size:10px;float:right;" id="needsPhotoCount">0</span></h2>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+        Items without a photo. Tap one to add a photo — it drops off this list once it has one. This only filters by missing photos; categories and locations are untouched.
+      </div>
+      <input type="text" id="needsPhotoSearch" placeholder="Search items needing a photo…" style="margin-bottom:10px;">
+      <div class="item-list" id="needsPhotoList"></div>
     </div>
   </div>
 
@@ -1712,6 +1725,10 @@ function switchTab(name) {
   if (name === 'locations') {
     if (!state.items || state.items.length === 0) refreshItems();
     renderLocationsTab();
+  }
+  if (name === 'needsphoto') {
+    if (!state.items || state.items.length === 0) refreshItems();
+    else renderLists();
   }
   if (name === 'admin') {
     renderAdminTab();
@@ -4965,6 +4982,35 @@ function renderLists() {
           <div class="iid">${c.id}</div>
         </div>`;
       }).join('');
+
+  // ---- Needs Photo — items missing a photo (pure filter) ----
+  const needsPhoto = containers.filter(c => c.type === 'item' && !c.has_photo);
+  const npBadge = el('needsPhotoBadge');
+  if (npBadge) {
+    if (needsPhoto.length > 0) { npBadge.textContent = needsPhoto.length; npBadge.classList.add('show'); }
+    else { npBadge.classList.remove('show'); }
+  }
+  if (el('needsPhotoCount')) el('needsPhotoCount').textContent = needsPhoto.length;
+  if (el('needsPhotoList')) {
+    const npq = (el('needsPhotoSearch')?.value || '').toLowerCase();
+    const filteredNP = !npq ? needsPhoto : needsPhoto.filter(c =>
+      friendlyName(c).toLowerCase().includes(npq) ||
+      (c.notes || '').toLowerCase().includes(npq) ||
+      (c.category || '').toLowerCase().includes(npq) ||
+      (c.supplier_sku || '').toLowerCase().includes(npq) ||
+      c.id.toLowerCase().includes(npq)
+    );
+    el('needsPhotoList').innerHTML = filteredNP.length === 0
+      ? `<div class="empty-state">${needsPhoto.length === 0 ? 'Every item has a photo. 🎉' : 'No matches.'}</div>`
+      : filteredNP.map(c => {
+          const sku = c.supplier_sku ? `<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px;">${escapeHtml(c.supplier_sku)}</div>` : '';
+          return `<div class="item-row" onclick="showItemDetail('${c.id}')">
+            <div class="ititle">${escapeHtml(friendlyName(c))}${sku}</div>
+            <div class="imeta">📷 Add photo</div>
+            <div class="iid">${c.id}</div>
+          </div>`;
+        }).join('');
+  }
 }
 
 /* Tapping an unassigned container opens the camera to pick a bin for it. */
@@ -4993,6 +5039,7 @@ if (el('binSearch')) {
 }
 if (el('unassignedSearch')) {
   el('unassignedSearch').addEventListener('input', renderLists);
+  if (el('needsPhotoSearch')) el('needsPhotoSearch').addEventListener('input', renderLists);
 }
 
 /* ---- TOP SEARCH BAR (on Scan tab) ---- */
@@ -6032,7 +6079,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.14';
+const FRONTEND_BUILD = '2.9.15';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
