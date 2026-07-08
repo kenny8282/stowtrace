@@ -3,6 +3,17 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.16 — Printer switch updates format + Camera/Upload photo buttons
+
+- Switching printers now updates the Label Format to match: switching to Brother
+  sets the label height to the active tape width so new labels fit; switching to
+  Zebra applies the selected die-cut size. Fixes labels not generating because the
+  format didn't match the selected printer.
+- Adding a photo now offers two buttons side by side: **Camera** (opens the camera
+  to take a picture) and **Upload** (pick an existing photo from the device). Both
+  go through the same crop-and-save flow. Applies to both adding and replacing a
+  photo.
+
 ## 2.9.15 — Needs Photo tab + cleaner Label Forge
 
 **Needs Photo tab (inventory):**
