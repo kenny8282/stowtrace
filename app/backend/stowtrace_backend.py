@@ -31,7 +31,7 @@ import base64
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 
-APP_VERSION = "2.9.13"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
+APP_VERSION = "2.9.14"  # Phases 1-3.5: server search, locations tree, auth+roles+audit (home mode default), owner reports
 
 # Where data lives. Change with env var if you want a different path.
 DATA_DIR = Path(os.environ.get("ST_DATA_DIR", "/var/lib/stowtrace"))
@@ -553,6 +553,13 @@ def _auth_init():
     except Exception as e:
         app.logger.warning(f"category dedupe skipped: {e}")
 
+    # Always repair orphaned items (pointing at a missing category) so every item
+    # stays browsable — runs even when there were no duplicates to dedupe.
+    try:
+        _repair_orphan_items(d)
+    except Exception as e:
+        app.logger.warning(f"orphan repair skipped: {e}")
+
 
 def _migrate_location_restructure(d):
     """Idempotent Stage 1 migration. Safe to run repeatedly.
@@ -1024,6 +1031,58 @@ def _dedupe_categories(d):
     d.commit()
     removed = len(categories) - len(new_categories)
     app.logger.info(f"category dedupe: removed {removed} duplicate categories, repointed {moved} items")
+
+    # After dedup, repair any items still pointing at a category id that no
+    # longer exists (orphans) so they remain browsable.
+    _repair_orphan_items(d)
+
+
+def _repair_orphan_items(d):
+    """Re-file items whose category_id points at a non-existent category into an
+    'Uncategorized' top-level category, so every item is always reachable by
+    browsing. Idempotent — a no-op when there are no orphans."""
+    try:
+        categories = json.loads(_read_file("st:categories") or "{}")
+    except Exception:
+        return
+    if not isinstance(categories, dict):
+        return
+    valid_ids = set(categories.keys())
+
+    # Find orphans (have a category_id that isn't a real category).
+    orphan_rows = []
+    for row in d.execute("SELECT id, data, category_id FROM items WHERE type IN ('item','container')").fetchall():
+        cid = row["category_id"]
+        if cid and cid not in valid_ids:
+            orphan_rows.append(row)
+    if not orphan_rows:
+        return
+
+    # Find or create an "Uncategorized" top-level category.
+    uncat_id = None
+    for cid, node in categories.items():
+        if isinstance(node, dict) and node.get("name") == "Uncategorized" and not node.get("parent_id"):
+            uncat_id = cid
+            break
+    if uncat_id is None:
+        import secrets as _secrets
+        uncat_id = "cat_" + _secrets.token_hex(4)
+        categories[uncat_id] = {"id": uncat_id, "name": "Uncategorized",
+                                "parent_id": None, "attributes": []}
+        _write_file("st:categories", json.dumps(categories))
+
+    fixed = 0
+    for row in orphan_rows:
+        try:
+            it = json.loads(row["data"])
+        except Exception:
+            continue
+        it["category_id"] = uncat_id
+        d.execute("UPDATE items SET data=?, category_id=? WHERE id=?",
+                  (json.dumps(it), uncat_id, row["id"]))
+        fixed += 1
+    d.commit()
+    app.logger.info(f"orphan repair: re-filed {fixed} items into Uncategorized")
 
 
 def _pin_hash(pin):
@@ -1821,6 +1880,36 @@ def categories_delete(cat_id):
 
     _cat_save(tree)
     return jsonify({"ok": True, "deleted": cat_id})
+
+
+@app.route("/api/categories/repair", methods=["POST"])
+def categories_repair():
+    """Manually run the category dedup + orphan repair (same as startup healing).
+    Returns counts so the UI can report what was fixed."""
+    d = _db()
+    before_cats = len(_cat_load())
+    orphan_before = 0
+    valid = set(_cat_load().keys())
+    for row in d.execute("SELECT category_id FROM items WHERE type IN ('item','container')").fetchall():
+        cid = row["category_id"]
+        if cid and cid not in valid:
+            orphan_before += 1
+    try:
+        _dedupe_categories(d)
+    except Exception as e:
+        app.logger.warning(f"repair dedupe: {e}")
+    try:
+        _repair_orphan_items(d)
+    except Exception as e:
+        app.logger.warning(f"repair orphans: {e}")
+    after_cats = len(_cat_load())
+    return jsonify({
+        "ok": True,
+        "categories_before": before_cats,
+        "categories_after": after_cats,
+        "duplicates_removed": max(0, before_cats - after_cats),
+        "orphans_found": orphan_before,
+    })
 
 
 @app.route("/api/categories/seed", methods=["POST"])
