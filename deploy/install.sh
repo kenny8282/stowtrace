@@ -131,6 +131,51 @@ else
   ok "ptouch-print built and installed to $(command -v ptouch-print)"
 fi
 
+# ---- CUPS + Zebra ZD411 (direct-thermal label printer) --------------------
+# The Zebra speaks ZPL/EPL and is driven via CUPS. We install CUPS and, if a
+# Zebra is plugged in, auto-create a raster print queue named "zebra_zd411".
+# StowTrace renders labels to PNG and sends them with `lp -d zebra_zd411`.
+if [ "${SKIP_ZEBRA:-}" != "1" ]; then
+  info "Setting up CUPS for Zebra label printing"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cups cups-client printer-driver-cups-pdf >/dev/null 2>&1 || \
+    warn "CUPS install had warnings (continuing)"
+  # printer-driver-zebra / rastertozebra may live in different packages by
+  # distro; try common ones but don't fail the whole install if absent.
+  apt-get install -y --no-install-recommends printer-driver-zebra >/dev/null 2>&1 || true
+  systemctl enable --now cups >/dev/null 2>&1 || true
+  # Service user needs to be in lpadmin to manage/print via CUPS.
+  usermod -aG lpadmin "$SERVICE_USER" >/dev/null 2>&1 || true
+
+  # Auto-detect a Zebra on USB (vendor 0a5f) and create a queue if none exists.
+  if lsusb 2>/dev/null | grep -qi "0a5f"; then
+    if ! lpstat -p zebra_zd411 >/dev/null 2>&1; then
+      ZEBRA_URI="$(lpinfo -v 2>/dev/null | awk '/usb.*[Zz]ebra/ {print $2; exit}')"
+      if [ -n "$ZEBRA_URI" ]; then
+        # Try a Zebra PPD if available; otherwise fall back to raw (raster) which
+        # still accepts PNG via CUPS image filters.
+        if lpinfo -m 2>/dev/null | grep -qi "zebra.*zd4"; then
+          ZPPD="$(lpinfo -m 2>/dev/null | awk '/[Zz]ebra.*ZD4/ {print $1; exit}')"
+          lpadmin -p zebra_zd411 -v "$ZEBRA_URI" -m "$ZPPD" -E 2>/dev/null && \
+            ok "CUPS queue 'zebra_zd411' created ($ZPPD)" || \
+            warn "Could not create Zebra queue with PPD; set it up in CUPS if needed"
+        else
+          lpadmin -p zebra_zd411 -v "$ZEBRA_URI" -m raw -E 2>/dev/null && \
+            ok "CUPS raw queue 'zebra_zd411' created" || \
+            warn "Could not create Zebra raw queue; set it up in CUPS if needed"
+        fi
+        lpadmin -d zebra_zd411 2>/dev/null || true
+      else
+        warn "Zebra on USB but no CUPS device URI found yet — power-cycle and re-run, or add it in CUPS"
+      fi
+    else
+      ok "CUPS queue 'zebra_zd411' already exists"
+    fi
+  else
+    ok "No Zebra detected on USB (optional — the Brother path is unaffected)"
+  fi
+fi
+
 # ---- udev rule for Brother printer access ---------------------------------
 info "Setting up printer USB permissions"
 UDEV_RULE=/etc/udev/rules.d/50-brother-ptouch.rules
