@@ -2452,13 +2452,19 @@ function renderItemDetail(rec) {
         </div>
         <div style="margin-top:6px;display:flex;gap:6px;">
           <button class="secondary" style="font-size:11px;padding:4px 10px;" onclick="recropItemPhoto('${rec.id}')">✂ Adjust Crop</button>
-          <button class="secondary" style="font-size:11px;padding:4px 10px;" onclick="triggerPhotoUpload('${rec.id}')">📷 Replace</button>
-          <input type="file" id="photoInput_${rec.id}" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
+          <button class="secondary" style="font-size:11px;padding:4px 10px;" onclick="triggerPhotoCapture('${rec.id}')">📷 Camera</button>
+          <button class="secondary" style="font-size:11px;padding:4px 10px;" onclick="triggerPhotoUpload('${rec.id}')">⬆ Upload</button>
+          <input type="file" id="photoCam_${rec.id}" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
+          <input type="file" id="photoInput_${rec.id}" accept="image/*" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
         </div>`;
     } else {
       html += `<div class="detail-field" style="margin-top: 8px;">
-        <button class="secondary photo-add-btn" onclick="triggerPhotoUpload('${rec.id}')">📷 Add Photo</button>
-        <input type="file" id="photoInput_${rec.id}" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
+        <div style="display:flex;gap:8px;">
+          <button class="secondary photo-add-btn" style="flex:1;" onclick="triggerPhotoCapture('${rec.id}')">📷 Camera</button>
+          <button class="secondary photo-add-btn" style="flex:1;" onclick="triggerPhotoUpload('${rec.id}')">⬆ Upload</button>
+        </div>
+        <input type="file" id="photoCam_${rec.id}" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
+        <input type="file" id="photoInput_${rec.id}" accept="image/*" style="display:none;" onchange="handlePhotoSelected(event, '${rec.id}')">
       </div>`;
     }
   }
@@ -4500,7 +4506,14 @@ const _photoCrop = {
 };
 
 function triggerPhotoUpload(itemId) {
+  // Device upload (gallery/files) — the input WITHOUT capture=environment.
   const inp = el(`photoInput_${itemId}`);
+  if (inp) inp.click();
+}
+
+function triggerPhotoCapture(itemId) {
+  // Camera capture — the input WITH capture=environment (opens camera on mobile).
+  const inp = el(`photoCam_${itemId}`) || el(`photoInput_${itemId}`);
   if (inp) inp.click();
 }
 
@@ -6079,7 +6092,7 @@ async function adminLoadAudit() {
 }
 
 /* ---- v2.3.0 BUILD STAMP ---- */
-const FRONTEND_BUILD = '2.9.15';
+const FRONTEND_BUILD = '2.9.16';
 async function renderBuildStamp() {
   const elDiv = document.createElement('div');
   elDiv.id = 'buildStamp';
