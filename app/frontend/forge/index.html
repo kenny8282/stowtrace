@@ -1962,6 +1962,12 @@ async function addRow(tabName, opts = {}) {
   }
   const w = opts.w != null ? opts.w : ts.formatW;
   const h = opts.h != null ? opts.h : ts.formatH;
+  // In Zebra/die-cut mode every label is the selected fixed size — override.
+  let rowW = w, rowH = h;
+  if (tabName === 'maker' && _printerMode === 'diecut') {
+    const dims = activeDiecutDims();
+    if (dims) { rowW = dims.w_mm; rowH = dims.h_mm; }
+  }
   // Maker rows get stamped with the per-tab Label Format default color; printer rows ignore color.
   const color = (tabName === 'maker') ? (opts.color || state.maker.formatColor || 'white-black') : null;
   const row = {
@@ -1972,7 +1978,7 @@ async function addRow(tabName, opts = {}) {
     line3: opts.line3 || '',
     qr: opts.qr !== undefined ? opts.qr : true,
     copies: opts.copies || 1,
-    w, h,
+    w: rowW, h: rowH,
     color,             // Slice 3: per-row color (Label Maker only)
     formatName: opts.formatName || 'custom',
     isReprint: !!opts.isReprint,   // Slice 5: marks rows that came from QR scan
@@ -2475,13 +2481,22 @@ function renderMakerPreview() {
     return;
   }
   if (activeH === null) {
-    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">Connect a printer or set <b>Preview as</b> in the printer strip to see selected labels.</div>`;
-    el('makerPreviewInfo').textContent = `${selected.length} selected · no active tape`;
+    const msg = (_printerMode === 'diecut')
+      ? `Select a label size in the printer strip to preview.`
+      : `Connect a printer or set <b>Preview as</b> in the printer strip to see selected labels.`;
+    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">${msg}</div>`;
+    el('makerPreviewInfo').textContent = `${selected.length} selected · no active size`;
     return;
   }
   if (printable.length === 0) {
-    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">${selected.length} row${selected.length===1?'':'s'} selected but none match the active ${activeH}mm tape.</div>`;
-    el('makerPreviewInfo').textContent = `${selected.length} selected · 0 of ${activeH}mm`;
+    const unit = (_printerMode === 'diecut') ? 'label size' : 'tape';
+    const dims = (_printerMode === 'diecut') ? activeDiecutDims() : null;
+    const sizeStr = dims ? `${dims.w_mm}×${dims.h_mm}mm` : `${activeH}mm`;
+    const hint = (_printerMode === 'diecut')
+      ? `${selected.length} row${selected.length===1?'':'s'} selected but none match the ${sizeStr} label. Add a row or set the row height to ${activeH}mm.`
+      : `${selected.length} row${selected.length===1?'':'s'} selected but none match the active ${activeH}mm tape.`;
+    body.innerHTML = `<div class="single-stage" style="color: var(--muted); font-size: 12px; text-align: center; padding: 40px;">${hint}</div>`;
+    el('makerPreviewInfo').textContent = `${selected.length} selected · 0 of ${sizeStr}`;
     return;
   }
 
@@ -2945,6 +2960,11 @@ function mmToTapePx(mm) { return Math.round(mm * TAPE_DPI / 25.4); }
      3. null — no active height; preview will be empty
    The override dropdown in the printer-status strip is ignored when a printer is connected. */
 function getActiveTapeHeight() {
+  // Zebra / die-cut mode: the "active height" is the selected label's height.
+  if (_printerMode === 'diecut') {
+    const dims = activeDiecutDims();
+    return dims ? dims.h_mm : null;
+  }
   if (_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm) {
     return _lastPrinterStatus.tape_width_mm;
   }
@@ -2957,6 +2977,10 @@ function getActiveTapeHeight() {
 
 /* True if the user has a real connected printer (vs preview-only override). */
 function isPrinterReady() {
+  if (_printerMode === 'diecut') {
+    // Zebra: ready when the driver reports connected AND a size is selected.
+    return !!(_lastPrinterStatus && _lastPrinterStatus.connected && activeDiecutDims());
+  }
   return !!(_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm);
 }
 
@@ -3755,13 +3779,17 @@ function updateStickyPrint() {
 
   let summaryHtml, btnHtml;
   if (tab === 'maker') {
-    // Slice 4: Maker print is gated by the connected printer's cartridge height.
-    // Only rows matching the cartridge are countable; printer must be connected.
     const ready = isPrinterReady();
-    const cartridgeH = ready ? _lastPrinterStatus.tape_width_mm : null;
-    const printable = ready ? selectedRows.filter(r => Math.abs(r.h - cartridgeH) < 0.01) : [];
+    // Active size: tape width (Brother) or die-cut label height (Zebra).
+    const activeH = getActiveTapeHeight();
+    const printable = (ready && activeH != null)
+      ? selectedRows.filter(r => Math.abs(r.h - activeH) < 0.01) : [];
     const printLabels = printable.reduce((s,r) => s + Math.max(1, r.copies||1), 0);
     const skipped = selCount - printable.length;
+    const unitLabel = (_printerMode === 'diecut')
+      ? ((activeDiecutDims() ? `${activeDiecutDims().w_mm}×${activeDiecutDims().h_mm}mm` : 'label'))
+      : `${activeH}mm cartridge`;
+    const printVerb = (_printerMode === 'diecut') ? 'Print Selected Labels' : 'Print Selected to Tape';
 
     let canPrint = ready && printable.length > 0;
     if (selCount === 0) {
@@ -3769,12 +3797,12 @@ function updateStickyPrint() {
     } else if (!ready) {
       summaryHtml = `<span style="color:var(--accent);">Connect a printer to print</span>`;
     } else if (printable.length === 0) {
-      summaryHtml = `<span style="color:var(--accent);">0 of ${selCount} match ${cartridgeH}mm cartridge</span>`;
+      summaryHtml = `<span style="color:var(--accent);">0 of ${selCount} match ${unitLabel}</span>`;
     } else {
-      summaryHtml = `<b>${printLabels}</b> label${printLabels===1?'':'s'} · ${printable.length}/${selCount} match ${cartridgeH}mm` +
+      summaryHtml = `<b>${printLabels}</b> label${printLabels===1?'':'s'} · ${printable.length}/${selCount} match ${unitLabel}` +
                     (skipped > 0 ? ` · ${skipped} skipped` : '');
     }
-    btnHtml = `<button class="primary-btn" id="makerBatchBtn" ${canPrint ? '' : 'disabled'}>⎙ Print Selected to Tape</button>`;
+    btnHtml = `<button class="primary-btn" id="makerBatchBtn" ${canPrint ? '' : 'disabled'}>⎙ ${printVerb}</button>`;
   } else {
     const labelCount = selectedRows.reduce((s,r) => s + Math.max(1, r.copies||1), 0);
     summaryHtml = selCount === 0
@@ -3966,6 +3994,9 @@ let _lastPrinterStatus = null;
    - Disconnected: show, so the user can pick a tape size for preview. */
 function updateOverrideVisibility() {
   const wrap = el('overrideWrap'); if (!wrap) return;
+  // The tape-width "Preview as" override is Brother-only. Never show it for a
+  // die-cut printer (Zebra) — that printer has its own label-size selector.
+  if (_printerMode === 'diecut') { wrap.style.display = 'none'; return; }
   const connected = !!(_lastPrinterStatus && _lastPrinterStatus.connected && _lastPrinterStatus.tape_width_mm);
   wrap.style.display = connected ? 'none' : '';
 }
@@ -4059,11 +4090,39 @@ async function onPrinterSelectChange() {
   refreshPrinterStatus();
 }
 
-// Show/hide printer-specific controls based on the selected driver's declared
-// capabilities. Brother shows tape options; Zebra shows a label-size preset.
+// Global: the currently selected printer's capabilities + derived mode.
+let _printerCaps = null;
+let _printerMode = 'tape';   // 'tape' (Brother) | 'diecut' (Zebra)
+
+// mm dimensions of a Zebra size-preset id like "2.25x1.25"
+function zebraPresetDims(presetId) {
+  if (!_printerCaps || !_printerCaps.size_presets) return null;
+  const p = _printerCaps.size_presets.find(s => s.id === presetId);
+  if (!p) return null;
+  return { w_mm: +(p.w_in * 25.4).toFixed(1), h_mm: +(p.h_in * 25.4).toFixed(1) };
+}
+
+// The active die-cut label size (mm) chosen in the Zebra size dropdown.
+function activeDiecutDims() {
+  const sel = el('zebraSizeSel');
+  const id = sel ? sel.value : (_printerCaps && _printerCaps.size_presets && _printerCaps.size_presets[0] ? _printerCaps.size_presets[0].id : null);
+  return id ? zebraPresetDims(id) : null;
+}
+
+// Show/hide printer-specific controls + reshape the Label Format section to
+// match the selected printer. Brother = tape (width chosen, length from content);
+// Zebra = die-cut (fixed size preset drives both dimensions).
 function applyPrinterCapabilities(caps, printer) {
   if (!caps) return;
+  _printerCaps = caps;
+  _printerMode = (caps.media === 'die_cut_roll') ? 'diecut' : 'tape';
   const shows = caps.show_options || [];
+
+  // --- Brother tape-override cluster (the "N. ↻ 24mm" strip): tape mode only.
+  const overrideWrap = el('overrideWrap');
+  if (overrideWrap) overrideWrap.style.display = (_printerMode === 'tape') ? '' : 'none';
+
+  // --- Zebra size-preset selector in the printer strip.
   let zebraWrap = el('zebraSizeWrap');
   if (shows.includes('size_preset')) {
     if (!zebraWrap) {
@@ -4076,12 +4135,62 @@ function applyPrinterCapabilities(caps, printer) {
         `<option value="${s.id}">${s.label}</option>`).join('');
       zebraWrap.innerHTML = `<span class="override-sep">·</span>
         <span class="label" style="font-size:10px;">LABEL SIZE:</span>
-        <select id="zebraSizeSel" class="override-sel">${presets}</select>`;
+        <select id="zebraSizeSel" class="override-sel" onchange="onZebraSizeChange()">${presets}</select>`;
       if (host) host.appendChild(zebraWrap);
     }
     zebraWrap.style.display = '';
   } else if (zebraWrap) {
     zebraWrap.style.display = 'none';
+  }
+
+  reshapeLabelFormatForPrinter();
+  // Re-render preview + table so mode change takes effect immediately.
+  if (typeof renderTable === 'function') renderTable('maker');
+  if (typeof schedulePreview === 'function') schedulePreview();
+}
+
+// When the Zebra label size changes, update the row defaults + preview.
+function onZebraSizeChange() {
+  reshapeLabelFormatForPrinter();
+  renderTable('maker');
+  schedulePreview();
+}
+
+// Reshape the Label Format defaults (Width/Height/Tape-Color) to match printer.
+function reshapeLabelFormatForPrinter() {
+  const wInput = el('makerW');
+  const hInput = el('makerH');
+  const colorRow = el('makerColorRow') || (el('makerColorSel') ? el('makerColorSel').closest('.field, .format-row, div') : null);
+  const wLabel = document.querySelector('label[for="makerW"]') || null;
+
+  if (_printerMode === 'diecut') {
+    const dims = activeDiecutDims();
+    if (dims && wInput && hInput) {
+      // Zebra: fixed label size drives BOTH dimensions; make them read-only.
+      wInput.value = dims.w_mm;
+      hInput.value = dims.h_mm;
+      wInput.readOnly = true;
+      hInput.readOnly = true;
+      wInput.style.opacity = '0.6';
+      hInput.style.opacity = '0.6';
+      // Keep the maker state in sync so new rows inherit the label size.
+      if (state && state.maker) { state.maker.formatW = dims.w_mm; state.maker.formatH = dims.h_mm; }
+    }
+    // Tape color is meaningless for direct-thermal — hide it.
+    const colorSel = el('makerColor') || el('makerColorSel');
+    if (colorSel) {
+      const wrap = colorSel.closest('.field') || colorSel.parentElement;
+      if (wrap) wrap.style.display = 'none';
+    }
+  } else {
+    // Brother tape: width = tape width (chosen), length from content. Editable.
+    if (wInput) { wInput.readOnly = false; wInput.style.opacity = ''; }
+    if (hInput) { hInput.readOnly = false; hInput.style.opacity = ''; }
+    const colorSel = el('makerColor') || el('makerColorSel');
+    if (colorSel) {
+      const wrap = colorSel.closest('.field') || colorSel.parentElement;
+      if (wrap) wrap.style.display = '';
+    }
   }
 }
 
