@@ -2313,9 +2313,9 @@ function renderTable(tabName) {
     tr.querySelector('.line2').addEventListener('input', onText('line2'));
     tr.querySelector('.line3').addEventListener('input', onText('line3'));
     tr.querySelector('.row-sel').addEventListener('change', e => {
-      row.selected = e.target.checked; updateStickyPrint(); schedulePreview();
+      row.selected = e.target.checked; updateStickyPrint(); schedulePreview(true);
     });
-    tr.querySelector('.qr-chk').addEventListener('change', e => { row.qr = e.target.checked; persistTabRows(tabName); logRow(row); schedulePreview(); });
+    tr.querySelector('.qr-chk').addEventListener('change', e => { row.qr = e.target.checked; persistTabRows(tabName); logRow(row); schedulePreview(true); });
     tr.querySelector('.copies-in').addEventListener('input', e => { row.copies = Math.max(1, parseInt(e.target.value) || 1); persistTabRows(tabName); updateMeta(); schedulePreview(); updateStickyPrint(); });
     tr.querySelector('.w-in').addEventListener('input', e => {
       const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) row.w = v;
@@ -2441,14 +2441,18 @@ async function deletePreset(tabName, presetId) {
 
 /* ---- PREVIEW ---- */
 let previewTimer = null;
-function schedulePreview() {
+function schedulePreview(immediate) {
   if (previewTimer) clearTimeout(previewTimer);
-  previewTimer = setTimeout(() => {
+  const run = () => {
     const ts = activeTabState();
     if (ts) ts.rows.forEach(logRow);
     renderPreview();
     updateMeta();
-  }, 200);
+  };
+  // Discrete changes (dropdowns, checkboxes, size selects) update instantly;
+  // text typing still debounces to avoid rendering on every keystroke.
+  if (immediate) { run(); return; }
+  previewTimer = setTimeout(run, 200);
 }
 
 function renderPreview() {
@@ -4160,14 +4164,21 @@ function onTapeWidthChange() {
   state.tapeOverrideMm = sel && sel.value ? sel.value : null;
   if (typeof persistConfig === 'function') persistConfig();
   renderTable('maker');
-  schedulePreview();
+  schedulePreview(true);
 }
 
 // When the Zebra label size changes, update the row defaults + preview.
 function onZebraSizeChange() {
   reshapeLabelFormatForPrinter();
+  // Zebra labels are a fixed size — update existing maker rows to the new size
+  // so the preview reflects the change immediately (real-time feel).
+  const dims = activeDiecutDims();
+  if (dims && state.maker && Array.isArray(state.maker.rows)) {
+    state.maker.rows.forEach(r => { r.w = dims.w_mm; r.h = dims.h_mm; });
+    if (typeof persistTabRows === 'function') persistTabRows('maker');
+  }
   renderTable('maker');
-  schedulePreview();
+  schedulePreview(true);
 }
 
 // Reshape the Label Format defaults (Width/Height/Tape-Color) to match printer.
