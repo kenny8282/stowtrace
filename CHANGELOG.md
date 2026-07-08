@@ -3,6 +3,30 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.10 — Universal printer system + Zebra ZD411 support (in progress)
+
+Adds a driver-based printer architecture so StowTrace can print to more than just
+the Brother P-Touch. Each printer is a driver with a common interface (detect,
+capabilities, status, print), registered centrally.
+
+- **Printer picker** in Label Forge: a dropdown lists every known printer with a
+  connected indicator (green/red), even when unplugged, so you can design and
+  preview without printing. Selecting one persists per box.
+- **Capabilities-driven UI**: the selected printer declares which options are
+  relevant, so Brother shows tape width/color while Zebra shows a die-cut label
+  size preset — no more irrelevant tape options when a Zebra is selected.
+- **Zebra ZD411 driver**: prints via CUPS (renders label to PNG, sends with `lp`).
+  Detects the Zebra on USB and whether its CUPS queue is ready. Standard
+  2.25"-wide direct-thermal presets included (2.25×1.25 POS tag default), 203/300
+  DPI aware.
+- **install.sh** installs CUPS and auto-creates a `zebra_zd411` queue when a Zebra
+  is detected on USB. The Brother path is unchanged.
+- The 8.5×11 Printer sheet page is untouched.
+
+Note: the Zebra path needs on-hardware testing with the actual printer and label
+stock to finalize (queue/PPD specifics, print alignment). The Brother path and all
+existing behavior are backward-compatible and fully working.
+
 ## 2.9.9 — Backup & restore available in Home Mode
 
 Backup and restore (Back up now, Restore from File, Restore from USB, Download
