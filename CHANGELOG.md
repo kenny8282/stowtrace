@@ -3,6 +3,17 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.20 — Header gear placement + bottom nav zoom fix
+
+- The Settings gear now sits directly next to the Home button (grouped together)
+  on both pages, instead of wrapping to its own line on mobile.
+- Label Forge bottom nav: the two tabs (Label Maker / Printer) now span the full
+  width evenly.
+- Bottom nav now stays pinned to the visible screen during pinch-zoom instead of
+  scrolling off-screen. It tracks the visual viewport and keeps a constant on-screen
+  size regardless of zoom level. (Needs a quick real-device check to confirm the
+  positioning feels right.)
+
 ## 2.9.19 — Settings gear + steadier Label Forge bottom nav
 
 - Settings now lives as a gear icon in the top-right of both pages, next to Home —
