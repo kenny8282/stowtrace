@@ -3,6 +3,26 @@
 All notable changes to StowTrace (and its Label Forge module) are documented here.
 Versions follow the app's `APP_VERSION` string.
 
+## 2.9.11 — Label Forge adapts to the selected printer
+
+Label Forge now reshapes itself to match whichever printer is selected, fixing the
+issues where a Zebra still showed Brother tape controls.
+
+- The Brother "Preview as" tape-width strip is hidden when a die-cut printer
+  (Zebra) is selected — it only applies to tape.
+- A **label-size selector** appears for the Zebra; picking a size sets the label's
+  fixed dimensions and updates the row defaults automatically.
+- The **Label Format** section adapts: for the Zebra, Width/Height show the chosen
+  die-cut label size (read-only, since it's fixed) and the Tape Color field is
+  hidden (direct thermal has no tape color). For the Brother it's unchanged —
+  editable width (tape) with length from content.
+- New rows added in Zebra mode default to the selected label size.
+- The preview and the print bar are now mode-aware: no more "none match the 24mm
+  tape" message when a Zebra is selected — it matches against the die-cut label
+  size instead, and the print button reads "Print Selected Labels."
+
+Still pending on-hardware verification with the actual ZD411 + label stock.
+
 ## 2.9.10 — Universal printer system + Zebra ZD411 support (in progress)
 
 Adds a driver-based printer architecture so StowTrace can print to more than just
